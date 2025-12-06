@@ -90,5 +90,12 @@ export const authApi = {
   resetPassword: async (phone: string, newPassword: string): Promise<{ message: string }> => {
     return apiClient.post('/auth/reset-password', { phone, newPassword });
   },
+
+  /**
+   * Check if phone number exists
+   */
+  checkPhoneExists: async (phone: string): Promise<{ exists: boolean; message: string }> => {
+    return apiClient.post('/auth/check-phone', { phone });
+  },
 };
 

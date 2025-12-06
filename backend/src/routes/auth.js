@@ -3,7 +3,7 @@
  */
 
 import express from 'express';
-import { signUp, signIn, verifyAuthToken, sendPasswordResetOTP, verifyPasswordResetOTP, resetPassword } from '../controllers/authController.js';
+import { signUp, signIn, verifyAuthToken, sendPasswordResetOTP, verifyPasswordResetOTP, resetPassword, checkPhoneExists } from '../controllers/authController.js';
 
 const router = express.Router();
 
@@ -15,6 +15,9 @@ router.post('/signin', signIn);
 
 // Verify token
 router.get('/verify', verifyAuthToken);
+
+// Check if phone exists
+router.post('/check-phone', checkPhoneExists);
 
 // Forgot password - send OTP
 router.post('/forgot-password', sendPasswordResetOTP);

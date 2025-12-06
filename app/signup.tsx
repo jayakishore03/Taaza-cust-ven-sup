@@ -9,6 +9,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Check } from 'lucide-react-native';
 import { View as RNView, Image } from 'react-native';
@@ -16,6 +17,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
+import { authApi } from '../lib/api/auth';
 
 type SignUpParams = {
   redirectPath?: string;
@@ -49,6 +51,9 @@ export default function SignUpScreen() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [gender, setGender] = useState<'male' | 'female' | ''>('');
   const [selectedProfileIcon, setSelectedProfileIcon] = useState<string>('');
+  const [phoneCheckStatus, setPhoneCheckStatus] = useState<'idle' | 'checking' | 'exists' | 'available'>('idle');
+  const [phoneCheckMessage, setPhoneCheckMessage] = useState('');
+  const [checkPhoneTimeout, setCheckPhoneTimeout] = useState<NodeJS.Timeout | null>(null);
 
   const redirectPath = Array.isArray(params.redirectPath) ? params.redirectPath[0] : params.redirectPath;
 
@@ -206,6 +211,62 @@ export default function SignUpScreen() {
     }
   }, [resendTimer]);
 
+  // Check if phone number exists (with debounce)
+  const checkPhoneAvailability = async (phoneNumber: string) => {
+    if (!phoneNumber || phoneNumber.length < 10) {
+      setPhoneCheckStatus('idle');
+      setPhoneCheckMessage('');
+      return;
+    }
+
+    setPhoneCheckStatus('checking');
+    setPhoneCheckMessage('');
+
+    try {
+      const result = await authApi.checkPhoneExists(phoneNumber);
+      if (result.exists) {
+        setPhoneCheckStatus('exists');
+        setPhoneCheckMessage('⚠️ This number is already registered. Please sign in instead.');
+      } else {
+        setPhoneCheckStatus('available');
+        setPhoneCheckMessage('✓ This number is available');
+      }
+    } catch (error) {
+      console.error('Error checking phone:', error);
+      setPhoneCheckStatus('idle');
+      setPhoneCheckMessage('');
+    }
+  };
+
+  // Debounced phone check
+  useEffect(() => {
+    // Clear previous timeout
+    if (checkPhoneTimeout) {
+      clearTimeout(checkPhoneTimeout);
+    }
+
+    // Reset status when phone changes
+    if (phone.length >= 10 && phoneCheckStatus !== 'checking') {
+      setPhoneCheckStatus('checking');
+    }
+
+    // Set new timeout for checking
+    const timeout = setTimeout(() => {
+      if (phone.length >= 10) {
+        checkPhoneAvailability(phone);
+      } else {
+        setPhoneCheckStatus('idle');
+        setPhoneCheckMessage('');
+      }
+    }, 800); // Wait 800ms after user stops typing
+
+    setCheckPhoneTimeout(timeout);
+
+    return () => {
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [phone]);
+
   return (
     <KeyboardAvoidingView
       style={styles.flex}
@@ -285,7 +346,7 @@ export default function SignUpScreen() {
             <TouchableOpacity
               style={[styles.sendOtpButton, otpVerified && styles.sendOtpButtonVerified]}
               onPress={handleSendOTP}
-              disabled={isSubmitting || !phone.trim() || phone.trim().length < 10 || resendTimer > 0 || otpVerified}
+              disabled={isSubmitting || !phone.trim() || phone.trim().length < 10 || resendTimer > 0 || otpVerified || phoneCheckStatus === 'exists'}
             >
               <Text style={styles.sendOtpButtonText}>
                 {otpVerified ? '✓ Verified' : resendTimer > 0 ? `Resend (${resendTimer}s)` : 'Send OTP'}
@@ -293,7 +354,27 @@ export default function SignUpScreen() {
             </TouchableOpacity>
           </View>
           <Text style={styles.noteText}>Give only WhatsApp mobile number</Text>
-          {otpSent && !otpVerified && (
+          
+          {/* Phone Check Status */}
+          {phoneCheckStatus === 'checking' && (
+            <View style={styles.phoneCheckContainer}>
+              <ActivityIndicator size="small" color="#DC2626" />
+              <Text style={styles.phoneCheckTextChecking}>Checking availability...</Text>
+            </View>
+          )}
+          {phoneCheckStatus === 'exists' && (
+            <View style={styles.phoneCheckContainer}>
+              <Text style={styles.phoneCheckTextExists}>{phoneCheckMessage}</Text>
+              <TouchableOpacity onPress={() => router.push('/signin')}>
+                <Text style={styles.phoneCheckLinkText}>Sign In Instead</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {phoneCheckStatus === 'available' && !otpVerified && (
+            <Text style={styles.phoneCheckTextAvailable}>{phoneCheckMessage}</Text>
+          )}
+
+          {otpSent && !otpVerified && phoneCheckStatus !== 'exists' && (
             <View style={styles.otpContainer}>
               <TextInput
                 style={[styles.input, styles.otpInput]}
@@ -819,6 +900,37 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 2,
     elevation: 3,
+  },
+  phoneCheckContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  phoneCheckTextChecking: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontStyle: 'italic',
+  },
+  phoneCheckTextExists: {
+    fontSize: 12,
+    color: '#DC2626',
+    fontWeight: '600',
+    flex: 1,
+  },
+  phoneCheckTextAvailable: {
+    fontSize: 12,
+    color: '#059669',
+    fontWeight: '600',
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  phoneCheckLinkText: {
+    fontSize: 12,
+    color: '#DC2626',
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
 });
 

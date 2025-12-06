@@ -272,7 +272,7 @@ export const signIn = async (req, res, next) => {
     if (!users || users.length === 0) {
       return res.status(401).json({
         success: false,
-        error: { message: 'Invalid credentials' },
+        error: { message: 'No account found with this phone number or email. Please check your details or sign up.' },
       });
     }
 
@@ -283,7 +283,7 @@ export const signIn = async (req, res, next) => {
     if (user.password !== hashedPassword) {
       return res.status(401).json({
         success: false,
-        error: { message: 'Invalid credentials' },
+        error: { message: 'Incorrect password. Please try again or use "Forgot Password" to reset it.' },
       });
     }
 
@@ -529,6 +529,43 @@ export const verifyPasswordResetOTP = async (req, res, next) => {
     res.json({
       success: true,
       data: { message: 'OTP verified successfully. You can now reset your password.' },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Check if phone number is already registered
+ * POST /api/auth/check-phone
+ */
+export const checkPhoneExists = async (req, res, next) => {
+  try {
+    const { phone } = req.body;
+
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Phone number is required' },
+      });
+    }
+
+    // Check if phone exists
+    const { data: users } = await supabase
+      .from('users')
+      .select('id')
+      .eq('phone', phone);
+
+    const exists = users && users.length > 0;
+
+    res.json({
+      success: true,
+      data: {
+        exists,
+        message: exists 
+          ? 'This phone number is already registered' 
+          : 'Phone number is available',
+      },
     });
   } catch (error) {
     next(error);
