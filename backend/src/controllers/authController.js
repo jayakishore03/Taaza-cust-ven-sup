@@ -52,6 +52,17 @@ export const signUp = async (req, res, next) => {
   try {
     const { name, email, phone, password, address, gender, profilePicture } = req.body;
 
+    console.log('========================================');
+    console.log('📝 SIGN-UP REQUEST RECEIVED');
+    console.log('========================================');
+    console.log('Name:', name);
+    console.log('Phone:', phone);
+    console.log('Email:', email || 'Not provided');
+    console.log('Has Address:', !!address);
+    console.log('Has Gender:', !!gender);
+    console.log('Has Profile Picture:', !!profilePicture);
+    console.log('========================================');
+
     // Validate required fields
     if (!name || !phone || !password) {
       return res.status(400).json({
@@ -140,6 +151,7 @@ export const signUp = async (req, res, next) => {
       .single();
 
     if (userError) {
+      console.error('❌ ERROR CREATING USER:', userError);
       // Handle database constraint errors with user-friendly messages
       if (userError.code === '23505') { // PostgreSQL unique violation error code
         if (userError.message.includes('users_email_key')) {
@@ -162,6 +174,9 @@ export const signUp = async (req, res, next) => {
       throw userError;
     }
 
+    console.log('✅ User created successfully in users table');
+    console.log('   User ID:', userId);
+
     // Create user profile
     const profileData = {
       id: userId,
@@ -174,9 +189,22 @@ export const signUp = async (req, res, next) => {
       updated_at: new Date().toISOString(),
     };
 
-    await supabaseAdmin
+    const { error: profileError } = await supabaseAdmin
       .from('user_profiles')
       .insert(profileData);
+
+    if (profileError) {
+      console.error('❌ ERROR CREATING USER PROFILE:', profileError);
+      // Delete the user we just created to maintain consistency
+      await supabaseAdmin.from('users').delete().eq('id', userId);
+      
+      return res.status(500).json({
+        success: false,
+        error: { message: 'Failed to create user profile. Please try again.' },
+      });
+    }
+
+    console.log('✅ User profile created successfully in user_profiles table');
 
     // Create default address if provided
     if (address) {
@@ -195,9 +223,15 @@ export const signUp = async (req, res, next) => {
         updated_at: new Date().toISOString(),
       };
 
-      await supabaseAdmin
+      const { error: addressError } = await supabaseAdmin
         .from('addresses')
         .insert(addressData);
+
+      if (addressError) {
+        console.error('⚠️  Warning: Error creating address:', addressError);
+        // Don't fail signup if address creation fails
+        // User can add address later
+      }
     }
 
     // Generate token
