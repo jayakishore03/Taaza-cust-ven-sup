@@ -31,13 +31,16 @@ export const getUserProfile = async (req, res, next) => {
   try {
     const userId = req.userId;
 
-    const { data: profile, error } = await supabase
+    console.log('📋 Fetching profile for user:', userId);
+
+    const { data: profile, error } = await supabaseAdmin
       .from('user_profiles')
       .select('*')
       .eq('id', userId)
       .single();
 
     if (error) {
+      console.error('❌ Error fetching profile:', error);
       if (error.code === 'PGRST116') {
         return res.status(404).json({
           success: false,
@@ -47,15 +50,29 @@ export const getUserProfile = async (req, res, next) => {
       throw error;
     }
 
+    console.log('✅ Profile found:', profile.name);
+
     // Get addresses
-    const { data: addresses } = await supabase
+    console.log('📍 Fetching addresses for user:', userId);
+    const { data: addresses, error: addressError } = await supabaseAdmin
       .from('addresses')
       .select('*')
       .eq('user_id', userId)
       .order('is_default', { ascending: false });
 
+    if (addressError) {
+      console.error('⚠️  Error fetching addresses:', addressError);
+    } else {
+      console.log(`✅ Found ${addresses?.length || 0} addresses`);
+      if (addresses && addresses.length > 0) {
+        console.log('   First address:', JSON.stringify(addresses[0], null, 2));
+      }
+    }
+
     const addressList = (addresses || []).map(formatAddress);
     const defaultAddress = addressList.find(addr => addr.isDefault) || addressList[0] || null;
+
+    console.log('📤 Returning profile with address:', defaultAddress ? 'Yes' : 'No');
 
     res.json({
       success: true,
@@ -70,6 +87,7 @@ export const getUserProfile = async (req, res, next) => {
       },
     });
   } catch (error) {
+    console.error('❌ Error in getUserProfile:', error);
     next(error);
   }
 };
@@ -131,21 +149,27 @@ export const getUserAddresses = async (req, res, next) => {
   try {
     const userId = req.userId;
 
-    const { data, error } = await supabase
+    console.log('📍 Fetching all addresses for user:', userId);
+
+    const { data, error } = await supabaseAdmin
       .from('addresses')
       .select('*')
       .eq('user_id', userId)
       .order('is_default', { ascending: false });
 
     if (error) {
+      console.error('❌ Error fetching addresses:', error);
       throw error;
     }
+
+    console.log(`✅ Found ${data?.length || 0} addresses for user ${userId}`);
 
     res.json({
       success: true,
       data: (data || []).map(formatAddress),
     });
   } catch (error) {
+    console.error('❌ Error in getUserAddresses:', error);
     next(error);
   }
 };
