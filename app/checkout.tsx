@@ -235,24 +235,15 @@ export default function CheckoutScreen() {
       return;
     }
 
-    let finalAddressId = user?.address?.id || '';
-
-    // Ensure address is saved before proceeding to payment
-    if (isAuthenticated && address) {
-      try {
-        // Save address to user profile if authenticated
-        await updateAddress(address);
-        // After saving, fetch fresh user profile to get the real address ID
-        const freshProfile = await usersApi.getProfile();
-        finalAddressId = freshProfile.address?.id || '';
-      } catch (error) {
-        console.error('Error saving address:', error);
-        Alert.alert('Address Error', 'Failed to save delivery address. Please try again.');
-        return;
-      }
+    // Validate address has required fields
+    if (!address.street || !address.city || !address.state || !address.postalCode) {
+      Alert.alert('Address Required', 'Please fill in all address fields before placing order.');
+      return;
     }
 
-    // Pass order data to payment page
+    let finalAddressId = user?.address?.id || '';
+
+    // Navigate immediately for better UX
     router.push({
       pathname: '/payment',
       params: {
@@ -262,6 +253,14 @@ export default function CheckoutScreen() {
         addressId: finalAddressId,
       },
     });
+
+    // Save address in background (non-blocking)
+    if (isAuthenticated && address) {
+      updateAddress(address).catch((error) => {
+        console.error('Background address save failed:', error);
+        // Don't show error to user since they're already on payment page
+      });
+    }
   };
 
   return (
