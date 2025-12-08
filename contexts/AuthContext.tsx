@@ -190,7 +190,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return;
 
     try {
-      await usersApi.addAddress(newAddress);
+      // Remove id field before adding (database will generate proper UUID)
+      const { id, ...addressWithoutId } = newAddress;
+      await usersApi.addAddress(addressWithoutId);
       const profile = await usersApi.getProfile();
       setUser(profile);
     } catch (error) {
@@ -203,7 +205,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return;
 
     try {
-      await usersApi.updateAddress(addressId, updatedAddress);
+      // Check if address has a valid UUID
+      const hasValidId = addressId && 
+        addressId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+
+      if (hasValidId) {
+        // Update existing address
+        await usersApi.updateAddress(addressId, updatedAddress);
+      } else {
+        // Dummy ID: create new address instead
+        const { id, ...addressWithoutId } = updatedAddress;
+        await usersApi.addAddress(addressWithoutId);
+      }
+      
       const profile = await usersApi.getProfile();
       setUser(profile);
     } catch (error) {
