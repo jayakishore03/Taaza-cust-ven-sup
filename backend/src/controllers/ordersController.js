@@ -355,10 +355,22 @@ export const createOrder = async (req, res, next) => {
       .single();
 
     if (orderResult.error || !orderResult.data) {
-      console.error('Error creating order:', orderResult.error);
+      console.error('========================================');
+      console.error('❌ ERROR CREATING ORDER IN DATABASE');
+      console.error('========================================');
+      console.error('Error Object:', JSON.stringify(orderResult.error, null, 2));
+      console.error('Error Code:', orderResult.error?.code);
+      console.error('Error Message:', orderResult.error?.message);
+      console.error('Error Details:', orderResult.error?.details);
+      console.error('Error Hint:', orderResult.error?.hint);
+      console.error('========================================');
       return res.status(500).json({
         success: false,
-        error: { message: 'Failed to create order' },
+        error: { 
+          message: 'Failed to create order',
+          details: orderResult.error?.message || 'Unknown error',
+          code: orderResult.error?.code || 'UNKNOWN'
+        },
       });
     }
 
