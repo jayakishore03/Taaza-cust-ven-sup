@@ -6,7 +6,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import {
   dummyAddOns,
-  dummyAddress,
   DELIVERY_CHARGE,
   COUPON_CODES,
   type Address,
@@ -26,8 +25,22 @@ export default function CheckoutScreen() {
   const [userCoordinates, setUserCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
   const { user, isAuthenticated, updateAddress } = useAuth();
 
+  // Create empty address template
+  const emptyAddress: Address = {
+    id: '',
+    contactName: user?.name || '',
+    phone: user?.phone || '',
+    street: '',
+    city: '',
+    state: '',
+    postalCode: '',
+    landmark: '',
+    label: 'Home',
+    isDefault: true,
+  };
+
   const defaultAddress = useMemo<Address>(
-    () => (user?.address ? { ...user.address } : { ...dummyAddress }),
+    () => (user?.address ? { ...user.address } : emptyAddress),
     [user]
   );
 
@@ -82,6 +95,14 @@ export default function CheckoutScreen() {
 
     fetchOrderCount();
   }, [isAuthenticated, user]);
+
+  // Update address when user profile changes
+  useEffect(() => {
+    if (user?.address) {
+      setAddress(user.address);
+      setAddressForm(user.address);
+    }
+  }, [user?.address]);
 
   // Calculate distance-based delivery charge
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -170,8 +191,8 @@ export default function CheckoutScreen() {
 
     const sanitizedAddress: Address = {
       ...addressForm,
-      contactName: addressForm.contactName.trim() || (user?.name ?? dummyAddress.contactName),
-      phone: addressForm.phone.trim(),
+      contactName: addressForm.contactName.trim() || user?.name || '',
+      phone: addressForm.phone.trim() || user?.phone || '',
       street: addressForm.street.trim(),
       city: addressForm.city.trim(),
       state: addressForm.state.trim(),
@@ -260,21 +281,34 @@ export default function CheckoutScreen() {
           <View style={styles.deliverySection}>
             <View style={styles.deliverySectionHeader}>
               <MapPin size={20} color="#DC2626" strokeWidth={2} />
-              <Text style={styles.deliverySectionTitle}>Deliver to Home</Text>
+              <Text style={styles.deliverySectionTitle}>Deliver to {address.label || 'Home'}</Text>
             </View>
-            <Text style={styles.deliveryAddress}>
-            {address.contactName}
-            {'\n'}
-            {address.phone}
-            {'\n'}
-            {address.street}
-            {'\n'}
-            {address.city}, {address.state} {address.postalCode}
-            {address.landmark ? `\nLandmark: ${address.landmark}` : ''}
-            </Text>
-            <TouchableOpacity style={styles.changeButton} onPress={handleChangeAddress}>
-              <Text style={styles.changeButtonText}>Change</Text>
-            </TouchableOpacity>
+            {address.street ? (
+              <>
+                <Text style={styles.deliveryAddress}>
+                  {address.contactName}
+                  {'\n'}
+                  {address.phone}
+                  {'\n'}
+                  {address.street}
+                  {'\n'}
+                  {address.city}, {address.state} {address.postalCode}
+                  {address.landmark ? `\nLandmark: ${address.landmark}` : ''}
+                </Text>
+                <TouchableOpacity style={styles.changeButton} onPress={handleChangeAddress}>
+                  <Text style={styles.changeButtonText}>Change</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.deliveryAddressEmpty}>
+                  No delivery address set
+                </Text>
+                <TouchableOpacity style={styles.addAddressButton} onPress={handleChangeAddress}>
+                  <Text style={styles.addAddressButtonText}>Add Address</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
 
           <View style={styles.section}>
@@ -577,6 +611,24 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     lineHeight: 20,
     marginBottom: 12,
+  },
+  deliveryAddressEmpty: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    fontStyle: 'italic',
+    marginBottom: 12,
+  },
+  addAddressButton: {
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  addAddressButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
   },
   changeButton: {
     alignSelf: 'flex-start',
