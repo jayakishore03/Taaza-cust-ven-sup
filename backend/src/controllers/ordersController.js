@@ -286,11 +286,30 @@ export const createOrder = async (req, res, next) => {
     } = req.body;
 
     // Validate required fields
-    if (!addressId || !items || !Array.isArray(items) || items.length === 0) {
+    if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
         success: false,
-        error: { message: 'Missing required fields: addressId and items' },
+        error: { message: 'Missing required field: items' },
       });
+    }
+
+    // Get user's address if not provided
+    let finalAddressId = addressId;
+    if (!finalAddressId) {
+      const userProfile = await supabaseAdmin
+        .from('user_profiles')
+        .select('address_id')
+        .eq('id', userId)
+        .single();
+      
+      finalAddressId = userProfile.data?.address_id;
+      
+      if (!finalAddressId) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'No delivery address found. Please add a delivery address.' },
+        });
+      }
     }
 
     // Check user's order count - free delivery for first 3 orders
@@ -318,7 +337,7 @@ export const createOrder = async (req, res, next) => {
       .insert({
         user_id: userId,
         shop_id: shopId || null,
-        address_id: addressId,
+        address_id: finalAddressId,
         order_number: orderNumber,
         subtotal,
         delivery_charge: finalDeliveryCharge,
@@ -353,7 +372,7 @@ export const createOrder = async (req, res, next) => {
     console.log(`Order Number: ${orderNumber}`);
     console.log(`User ID: ${userId}`);
     console.log(`Shop ID: ${shopId || 'None'}`);
-    console.log(`Address ID: ${addressId}`);
+    console.log(`Address ID: ${finalAddressId}`);
     console.log(`Total: ₹${order.total}`);
     console.log(`Payment Method: ${paymentMethodText || 'Cash on Delivery'}`);
     console.log(`Items Count: ${items.length}`);

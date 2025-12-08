@@ -167,7 +167,13 @@ export default function PaymentScreen() {
 
   const handleConfirmPayment = async () => {
     // Address is already collected in checkout page
-    // We receive addressId from checkout, no need to check user.address
+    // Check if we have addressId or can create one from user data
+    const finalAddressId = addressId || user?.address?.id;
+    
+    if (!finalAddressId && isAuthenticated) {
+      Alert.alert('Address Required', 'Please go back to checkout and set a delivery address.');
+      return;
+    }
     
     const isCod = selectedMethod === 'cod';
     const title = isCod ? 'Confirm Cash on Delivery' : 'Confirm Payment';
@@ -190,7 +196,7 @@ export default function PaymentScreen() {
             if (isCod) {
               const order = await ordersApi.create({
                 shopId: selectedShop?.id || undefined,
-                addressId: addressId || user?.address?.id || undefined,
+                addressId: finalAddressId || undefined,
                 items: cartItems.map((item) => {
                   const weightInKg = item.product.weightInKg || 1.0;
                   const pricePerKg = item.product.pricePerKg || item.product.price;
@@ -231,7 +237,7 @@ export default function PaymentScreen() {
               receipt: `order_${Date.now()}`,
               notes: {
                 userId: user?.id || '',
-                addressId: addressId || user?.address?.id || '',
+                addressId: finalAddressId || '',
                 shopId: selectedShop?.id || '',
               },
             });
@@ -266,10 +272,12 @@ export default function PaymentScreen() {
         razorpay_signature: signature,
       });
 
+      const finalAddressId = addressId || user?.address?.id;
+
       // Create order after successful payment verification
       await ordersApi.create({
         shopId: selectedShop?.id || undefined,
-        addressId: addressId || user?.address?.id || undefined,
+        addressId: finalAddressId || undefined,
         items: cartItems.map((item) => {
           const weightInKg = item.product.weightInKg || 1.0;
           const pricePerKg = item.product.pricePerKg || item.product.price;

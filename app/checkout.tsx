@@ -208,10 +208,21 @@ export default function CheckoutScreen() {
     }
   };
 
-  const handlePlaceOrder = () => {
+  const handlePlaceOrder = async () => {
     if (cartItems.length === 0) {
       Alert.alert('Empty Cart', 'Please add items to your cart before checkout.');
       return;
+    }
+
+    // Ensure address is saved before proceeding to payment
+    if (isAuthenticated && address) {
+      try {
+        // Save address to user profile if authenticated
+        await updateAddress(address);
+      } catch (error) {
+        console.error('Error saving address:', error);
+        // Continue anyway - backend will handle it
+      }
     }
 
     // Pass order data to payment page
@@ -221,7 +232,7 @@ export default function CheckoutScreen() {
         total: total.toString(),
         subtotal: subtotal.toString(),
         discount: discount.toString(),
-        addressId: user?.address?.id || '',
+        addressId: user?.address?.id || address?.id || '',
       },
     });
   };
