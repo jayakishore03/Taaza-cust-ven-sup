@@ -221,7 +221,7 @@ export default function CheckoutScreen() {
         total: total.toString(),
         subtotal: subtotal.toString(),
         discount: discount.toString(),
-        addressId: user?.address?.id || 'temp',
+        addressId: user?.address?.id || '',
       },
     });
   };
