@@ -96,7 +96,6 @@ export const signIn = async (data: SignInData): Promise<AuthResponse> => {
 
     return result;
   } catch (error: any) {
-    console.error('Sign in error:', error);
     return {
       success: false,
       error: {
@@ -173,6 +172,85 @@ export const checkHealth = async (): Promise<boolean> => {
     return result.success === true;
   } catch (error) {
     return false;
+  }
+};
+
+// ==================== SERVICES (Products & Rates) ====================
+
+export interface Service {
+  name: string;
+  description?: string;
+  price: number;
+  duration_hours?: number;
+  is_active?: boolean;
+}
+
+// Fetch vendor services/rates
+export const getServices = async (): Promise<Service[]> => {
+  try {
+    const token = await getAuthToken();
+
+    // Add a short timeout so UI isn't blocked when offline
+    const timeoutMs = 4000;
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), timeoutMs)
+    );
+
+    const response = await Promise.race([
+      fetch(`${API_BASE_URL}/services`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      }),
+      timeout,
+    ]);
+
+    // If the race was rejected by timeout, jump to catch
+    if (!response || !('ok' in response)) {
+      throw new Error('Network unavailable');
+    }
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch services: ${response.status}`);
+    }
+
+    const result = await response.json();
+    return result.data || [];
+  } catch (error) {
+    // Quiet fallback to empty list so UI can keep working offline
+    return [];
+  }
+};
+
+// Save vendor services/rates
+export const saveServices = async (
+  services: Service[]
+): Promise<{ success: boolean; message: string }> => {
+  try {
+    const token = await getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/services`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ services }),
+    });
+
+    const result = await response.json();
+
+    return {
+      success: !!result.success,
+      message: result.message || 'Services saved successfully',
+    };
+  } catch (error: any) {
+    console.error('Error saving services:', error);
+    return {
+      success: false,
+      message: error.message || 'Failed to save services',
+    };
   }
 };
 

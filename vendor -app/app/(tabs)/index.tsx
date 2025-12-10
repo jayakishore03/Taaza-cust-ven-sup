@@ -10,7 +10,9 @@ import {
   Platform,
   StatusBar,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, Href } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { getDashboardStats, DashboardStats } from '@/services/api';
@@ -38,10 +40,62 @@ export default function DashboardScreen() {
     pendingOrders: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [shopName, setShopName] = useState<string | undefined>(undefined);
+  const [isOpen, setIsOpen] = useState(true);
 
   useEffect(() => {
     loadDashboardData();
   }, []);
+
+  // Load cached vendor/shop name for header
+  useEffect(() => {
+    const loadVendorName = async () => {
+      const extractName = (data: any) =>
+        data?.shop?.storeName ||
+        data?.shop?.name ||
+        data?.shop?.store_name ||
+        data?.shop?.shopName ||
+        data?.user?.name ||
+        data?.user?.email;
+
+      try {
+        const vendorDataStr = await AsyncStorage.getItem('vendor_data');
+        if (vendorDataStr) {
+          const vendorData = JSON.parse(vendorDataStr);
+          const nameFromData = extractName(vendorData);
+          if (nameFromData) {
+            setShopName(nameFromData);
+            return;
+          }
+        }
+      } catch {
+        // Non-blocking: ignore storage errors
+      }
+
+      // Try auth user
+      if (user?.name) {
+        setShopName(user.name);
+      }
+
+      // Fetch fresh profile and persist for future loads
+      try {
+        const { getVendorProfile } = await import('@/services/api');
+        const profile = await getVendorProfile();
+        if (profile?.data) {
+          const nameFromProfile = extractName(profile.data);
+          if (nameFromProfile) {
+            setShopName(nameFromProfile);
+          }
+          // cache latest vendor data
+          await AsyncStorage.setItem('vendor_data', JSON.stringify(profile.data));
+        }
+      } catch {
+        // Silently ignore network/profile errors for header text
+      }
+    };
+
+    loadVendorName();
+  }, [user]);
 
   const loadDashboardData = async () => {
     try {
@@ -77,7 +131,7 @@ export default function DashboardScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>Welcome back!</Text>
-          <Text style={styles.vendorName}>{user?.name || 'Taaza Shop'}</Text>
+          <Text style={styles.vendorName}>{shopName || user?.name || 'Taaza Shop'}</Text>
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.bellButton}>
@@ -89,6 +143,22 @@ export default function DashboardScreen() {
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
             <LogOut size={24} color="#000" />
           </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Open/Close toggle */}
+      <View style={styles.openCloseContainer}>
+        <Text style={styles.openCloseLabel}>Store Status:</Text>
+        <View style={styles.statusRow}>
+          <Text style={[styles.statusText, isOpen ? styles.openText : styles.closeText]}>
+            {isOpen ? 'Open' : 'Closed'}
+          </Text>
+          <Switch
+            value={isOpen}
+            onValueChange={setIsOpen}
+            thumbColor={isOpen ? '#111111' : '#f4f3f4'}
+            trackColor={{ true: '#c7ffd9', false: '#ffd6d6' }}
+          />
         </View>
       </View>
 
@@ -264,6 +334,36 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     padding: 8,
+  },
+  openCloseContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+    paddingTop: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e5e5',
+  },
+  openCloseLabel: {
+    fontSize: 16,
+    color: '#444',
+    fontWeight: '600',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  statusText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  openText: {
+    color: '#1f7a3d',
+  },
+  closeText: {
+    color: '#b02626',
   },
   content: {
     flex: 1,
