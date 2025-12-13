@@ -266,8 +266,12 @@ export default function OrdersScreen() {
               <View key={`${item.productId || index}-${index}`} style={styles.itemRow}>
                 {item.image ? (
                   <Image 
-                    source={typeof item.image === 'string' ? { uri: item.image } : getImageSource(item.image)} 
-                    style={styles.itemImage} 
+                    source={typeof item.image === 'string' 
+                      ? getImageSource(item.image, item.name) 
+                      : getImageSource(item.image, item.name)} 
+                    style={styles.itemImage}
+                    defaultSource={require('../../assets/images/icon.png')}
+                    resizeMode="cover"
                   />
                 ) : (
                   <View style={styles.itemImagePlaceholder}>

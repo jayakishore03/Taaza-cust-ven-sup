@@ -19,6 +19,7 @@ import { useRouter } from 'expo-router';
 import MapView, { Marker } from 'react-native-maps';
 import { Feather } from '@expo/vector-icons';
 import { FontAwesome5 } from '@expo/vector-icons';
+import { useRegistration } from '@/contexts/RegistrationContext';
 
 const SCREEN = Dimensions.get('window');
 const TOTAL_STEPS = 6;
@@ -33,15 +34,11 @@ const SHOP_TYPES = [
 
 export default function Step1BasicDetails() {
   const router = useRouter();
+  const { updateRegistrationData } = useRegistration();
   const [shopType, setShopType] = useState<string | null>(null);
   const [form, setForm] = useState({
     ownerName: '',
     storeName: '',
-    address: '',
-    shopPlot: '',
-    floor: '',
-    building: '',
-    pincode: '',
     storePhotos: [],
     location: null,
     shopType: '',
@@ -117,11 +114,23 @@ export default function Step1BasicDetails() {
     setForm((f) => ({ ...f, shopType: type }));
   };
 
-  const handleNext = () => {
-    if (!form.ownerName || !form.storeName || !form.pincode) {
+  const handleNext = async () => {
+    if (!form.ownerName || !form.storeName) {
       Alert.alert('Incomplete Form', 'Please fill in all required details before proceeding.');
       return;
     }
+    
+    // Save all Step 1 data to registration context before navigating
+    await updateRegistrationData({
+      ownerName: form.ownerName,
+      storeName: form.storeName,
+      location: form.location,
+      area: locationDetails.area,
+      city: locationDetails.city,
+      storePhotos: form.storePhotos,
+      shopType: form.shopType || shopType,
+    });
+    
     router.push('/partner-registration/contact');
   };
 
@@ -286,42 +295,6 @@ export default function Step1BasicDetails() {
           value={form.storeName}
           onChangeText={(t) => setForm((f) => ({ ...f, storeName: t }))}
         />
-
-        <View style={styles.addressBlock}>
-        <View style={styles.sectionHeader}>
-          <FontAwesome5 name="store" size={18} color="#000" />
-          <Text style={styles.sectionHeaderText}>Shop Address</Text>
-        </View>
-          <TextInput
-            style={styles.input}
-            placeholder="Shop/Plot Number"
-            placeholderTextColor="#999"
-            value={form.shopPlot}
-            onChangeText={(t) => setForm((f) => ({ ...f, shopPlot: t }))}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Floor (Optional)"
-            placeholderTextColor="#999"
-            value={form.floor}
-            onChangeText={(t) => setForm((f) => ({ ...f, floor: t }))}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Building/Complex Name"
-            placeholderTextColor="#999"
-            value={form.building}
-            onChangeText={(t) => setForm((f) => ({ ...f, building: t }))}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Pincode"
-            placeholderTextColor="#999"
-            value={form.pincode}
-            keyboardType="numeric"
-            onChangeText={(t) => setForm((f) => ({ ...f, pincode: t }))}
-          />
-        </View>
 
         <View style={styles.photosBlock}>
           <View style={styles.sectionHeader}>
@@ -508,17 +481,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
-  },
-  addressBlock: {
-    marginBottom: 8,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
   },
   photosBlock: {
     marginBottom: 8,

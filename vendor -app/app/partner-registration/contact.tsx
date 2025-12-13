@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
+import { useRegistration } from '@/contexts/RegistrationContext';
 
 const TOTAL_STEPS = 7;
 const CURRENT_STEP = 2;
@@ -24,6 +25,7 @@ interface FormState {
 
 export default function Step2ContactDetails() {
   const router = useRouter();
+  const { updateRegistrationData } = useRegistration();
 
   const [form, setForm] = useState<FormState>({
     email: '',
@@ -222,7 +224,27 @@ export default function Step2ContactDetails() {
 
           <TouchableOpacity
             style={styles.nextButton}
-            onPress={() => {
+            onPress={async () => {
+              // Validate required fields
+              if (!form.email || !form.mobileNumber) {
+                Alert.alert('Incomplete Form', 'Please fill in email and mobile number before proceeding.');
+                return;
+              }
+              
+              if (!otpVerified) {
+                Alert.alert('OTP Required', 'Please verify your mobile number with OTP before proceeding.');
+                return;
+              }
+              
+              // Save all Step 2 data to registration context before navigating
+              await updateRegistrationData({
+                email: form.email,
+                mobileNumber: form.mobileNumber,
+                whatsappNumber: form.whatsappNumber || form.mobileNumber,
+                isWhatsAppSame: form.isWhatsAppSame,
+                otpVerified: otpVerified,
+              });
+              
               // Navigate to working-days route on next step
               router.push('/partner-registration/working-days');
             }}

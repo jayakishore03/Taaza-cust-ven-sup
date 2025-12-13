@@ -60,42 +60,58 @@ export default function LoginScreen() {
       return;
     }
     setLoading(true);
+    let loginSuccess = false;
     
     try {
       const result = await signIn(email, password);
       
       if (result.success) {
-        // Load vendor profile data if available
-        try {
-          const { getVendorProfile } = await import('@/services/api');
-          const vendorResult = await getVendorProfile();
-          if (vendorResult.success && vendorResult.data) {
-            // Vendor data is now stored in session storage
-            console.log('Vendor profile loaded:', vendorResult.data);
-            const nameFromData =
-              vendorResult.data?.shop?.storeName ||
-              vendorResult.data?.shop?.name ||
-              vendorResult.data?.user?.name ||
-              vendorResult.data?.user?.email;
-            if (nameFromData) {
-              setShopName(nameFromData);
-            }
-          }
-        } catch (vendorError) {
-          console.error('Error loading vendor profile:', vendorError);
-          // Continue even if vendor profile fails to load
-        }
-        
+        loginSuccess = true;
+        // Navigate immediately for fast user experience
         router.replace('/(tabs)');
+        
+        // Load vendor profile data in the background (non-blocking)
+        // This happens after navigation so it doesn't delay the user
+        (async () => {
+          try {
+            const { getVendorProfile } = await import('@/services/api');
+            const vendorResult = await getVendorProfile();
+            if (vendorResult.success && vendorResult.data) {
+              // Vendor data is now stored in session storage
+              console.log('Vendor profile loaded:', vendorResult.data);
+              const nameFromData =
+                vendorResult.data?.shop?.storeName ||
+                vendorResult.data?.shop?.name ||
+                vendorResult.data?.user?.name ||
+                vendorResult.data?.user?.email;
+              if (nameFromData) {
+                setShopName(nameFromData);
+              }
+            }
+          } catch (vendorError) {
+            console.error('Error loading vendor profile:', vendorError);
+            // Continue even if vendor profile fails to load
+          }
+        })();
       } else {
-        Alert.alert('Login Failed', result.error || 'Invalid email or password');
+        // Show error message with better formatting
+        const errorMsg = result.error || 'Invalid email or password';
+        Alert.alert('Login Failed', errorMsg);
+        setLoading(false);
       }
     } catch (error: any) {
-      // Allow navigation even if the network fails, so the user is not blocked
-      router.replace('/(tabs)');
-      Alert.alert('Offline Mode', 'Network unavailable, continuing offline.');
-    } finally {
+      // Show network error to user
+      const errorMessage = error?.message || 'Network request failed';
+      Alert.alert(
+        'Connection Error',
+        errorMessage + '\n\nPlease ensure:\n• Backend server is running\n• Correct IP address in config/api.ts\n• Device and computer are on same network'
+      );
       setLoading(false);
+    } finally {
+      // Don't set loading to false if we're navigating (let the new screen handle it)
+      if (!loginSuccess) {
+        setLoading(false);
+      }
     }
   };
 

@@ -87,6 +87,24 @@ export const signIn = async (data: SignInData): Promise<AuthResponse> => {
       body: JSON.stringify(data),
     });
 
+    // Check if response is ok before parsing JSON
+    if (!response.ok) {
+      // Try to parse error response
+      let errorMessage = 'Login failed';
+      try {
+        const errorResult = await response.json();
+        errorMessage = errorResult.error?.message || errorResult.message || `Server error (${response.status})`;
+      } catch {
+        errorMessage = `Server error (${response.status})`;
+      }
+      return {
+        success: false,
+        error: {
+          message: errorMessage,
+        },
+      };
+    }
+
     const result = await response.json();
 
     if (result.success && result.data?.token) {
@@ -96,10 +114,21 @@ export const signIn = async (data: SignInData): Promise<AuthResponse> => {
 
     return result;
   } catch (error: any) {
+    // Provide more helpful error messages for network issues
+    let errorMessage = 'Network request failed';
+    
+    if (error.message) {
+      if (error.message.includes('Network request failed') || error.message.includes('Failed to fetch')) {
+        errorMessage = 'Cannot connect to server. Please check:\n\n1. Backend server is running\n2. Correct IP address in config\n3. Device and computer are on same network';
+      } else {
+        errorMessage = error.message;
+      }
+    }
+    
     return {
       success: false,
       error: {
-        message: error.message || 'Network error. Please check your connection.',
+        message: errorMessage,
       },
     };
   }

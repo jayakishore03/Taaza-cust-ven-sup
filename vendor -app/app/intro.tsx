@@ -36,7 +36,7 @@ export default function IntroScreen() {
   const player = useVideoPlayer(videoSource, (player) => {
     player.loop = false;
     player.muted = false;
-    player.playbackRate = 1.2; // Slightly increase playback speed (20% faster)
+    player.playbackRate = 2.0; // Increased playback speed (2x faster)
     player.play();
   });
 
@@ -98,6 +98,25 @@ export default function IntroScreen() {
       }
     };
   }, [player, navigateToLogin]);
+
+  // Handle keep-awake errors (non-critical, can be ignored)
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+        const errorMessage = event.reason?.message || event.reason?.toString() || '';
+        if (errorMessage.includes('keep awake') || errorMessage.includes('Unable to activate keep awake')) {
+          event.preventDefault();
+          // Silently ignore keep-awake errors - they're non-critical
+          return;
+        }
+      };
+
+      window.addEventListener('unhandledrejection', handleUnhandledRejection);
+      return () => {
+        window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+      };
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {

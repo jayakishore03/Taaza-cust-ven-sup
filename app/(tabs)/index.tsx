@@ -242,10 +242,38 @@ export default function HomeScreen() {
       
       try {
         setIsLoadingProducts(true);
-        const productsData = await productsApi.getByCategory(selectedCategory);
-        setProducts(productsData);
+        console.log('[HomeScreen] Fetching products:', {
+          category: selectedCategory,
+          shopId: selectedShop.id,
+          shopName: selectedShop.name,
+        });
+        
+        // Use Supabase directly to filter by shop_id and is_available
+        // This ensures we get the latest prices updated by vendors
+        const { getProductsByCategory } = await import('../../lib/services/products');
+        const productsData = await getProductsByCategory(selectedCategory, selectedShop.id);
+        
+        console.log('[HomeScreen] Products loaded:', productsData.length);
+        
+        // Log prices for verification
+        if (__DEV__ && productsData.length > 0) {
+          productsData.forEach((product) => {
+            console.log(`[HomeScreen] Product: ${product.name} - Price: ₹${product.price} (₹${product.pricePerKg}/kg)`);
+          });
+        }
+        
+        if (productsData.length === 0) {
+          console.warn('[HomeScreen] No products found. Trying without shop filter...');
+          // Fallback: try to get products without shop filter if none found
+          const allProducts = await getProductsByCategory(selectedCategory);
+          console.log('[HomeScreen] Products without shop filter:', allProducts.length);
+          setProducts(allProducts);
+        } else {
+          setProducts(productsData);
+        }
       } catch (error) {
         // Handle errors gracefully without showing alerts
+        console.error('[HomeScreen] Error loading products:', error);
         if (__DEV__) {
           const errorMessage = error instanceof Error ? error.message : 'Failed to load products';
           console.warn('Products not available:', errorMessage.includes('timeout') || errorMessage.includes('connect') 
@@ -516,7 +544,15 @@ export default function HomeScreen() {
                           params: { productId: product.id }
                         })}
                       >
-                        <Image source={getImageSource(product.image)} style={styles.productImage} />
+                        <Image 
+                          source={getImageSource(product.image, product.name, product.category)} 
+                          style={styles.productImage}
+                          defaultSource={require('../../assets/images/icon.png')}
+                          onError={(error) => {
+                            console.warn('[HomeScreen] Image failed to load:', product.name, product.image);
+                          }}
+                          resizeMode="cover"
+                        />
                         <View style={styles.productInfo}>
                           <Text style={styles.productName}>{product.name || ''}</Text>
                           <Text style={styles.productWeight}>{displayWeight}</Text>

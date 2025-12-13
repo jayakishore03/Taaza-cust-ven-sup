@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { signIn as apiSignIn, signUp as apiSignUp, signOut as apiSignOut, verifyToken, getAuthToken, AuthResponse } from '../services/api';
+import { signInVendor, getShopByVendorId } from '../services/shops';
+import { supabase } from '../lib/supabase';
 
 interface User {
   id: string;
@@ -32,27 +34,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const checkAuthStatus = async () => {
     try {
-      const token = await getAuthToken();
-      if (token) {
-        const result = await verifyToken();
-        if (result.success && result.user) {
-          setUser(result.user);
-          
-          // Also load vendor data from session storage if available
+      // Check Supabase Auth session
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (error) {
+        console.error('Error checking auth session:', error);
+        setIsLoading(false);
+        return;
+      }
+
+      if (session?.user) {
+        // User is authenticated, fetch shop details
+        const userId = session.user.id;
+        const shop = await getShopByVendorId(userId);
+        
+        setUser({
+          id: session.user.id,
+          name: session.user.user_metadata?.name || session.user.email || '',
+          phone: session.user.phone || '',
+          email: session.user.email || '',
+        });
+
+        // Store vendor data
+        if (shop) {
+          await AsyncStorage.setItem('vendor_data', JSON.stringify({
+            user: {
+              id: session.user.id,
+              email: session.user.email,
+              phone: session.user.phone,
+              name: shop.owner_name || session.user.user_metadata?.name || session.user.email,
+            },
+            shop: {
+              id: shop.id,
+              name: shop.name,
+              storeName: shop.name,
+              owner_name: shop.owner_name,
+              email: shop.email,
+              mobile_number: shop.mobile_number,
+              is_active: shop.is_active,
+              ...shop,
+            },
+          }));
+          console.log('[AuthContext] Vendor session restored:', {
+            userId: session.user.id,
+            shopId: shop.id,
+            shopName: shop.name,
+          });
+        } else {
+          // Load from AsyncStorage if shop not found
           try {
             const vendorDataStr = await AsyncStorage.getItem('vendor_data');
             if (vendorDataStr) {
               const vendorData = JSON.parse(vendorDataStr);
-              // Vendor data is available for use in the app
-              console.log('Vendor data loaded:', vendorData);
+              console.log('[AuthContext] Vendor data loaded from storage:', vendorData);
             }
           } catch (error) {
             console.error('Error loading vendor data:', error);
           }
-        } else {
-          // Token invalid, clear it
-          await apiSignOut();
         }
+      } else {
+        // No session, clear stored data
+        await AsyncStorage.removeItem('vendor_data');
       }
     } catch (error) {
       console.error('Error checking auth status:', error);
@@ -65,46 +107,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
 
-      // Put a cap on how long we wait for the network; after the timeout we
-      // optimistically allow offline navigation so the user is not blocked.
-      const timeoutMs = 5000;
-      const timeoutPromise = new Promise<{ success: boolean; error?: string; offline?: boolean }>((resolve) =>
-        setTimeout(() => resolve({ success: true, offline: true }), timeoutMs)
-      );
-
-      const apiPromise = apiSignIn({ email, password });
-      const result: AuthResponse & { offline?: boolean } = await Promise.race([apiPromise, timeoutPromise]);
+      // Use Supabase Auth for vendor sign-in (vendors are registered in Supabase Auth)
+      const result = await signInVendor(email, password);
       
-      if ((result as any).offline) {
-        // Offline fallback: create a lightweight user so protected screens can render.
+      if (result.success && result.user) {
+        // Set user data
         setUser({
-          id: 'offline-user',
-          name: email || 'Offline User',
-          phone: '',
-          email,
+          id: result.user.id,
+          name: result.user.name,
+          phone: result.user.phone || '',
+          email: result.user.email,
         });
+
+        // Store vendor data (user + shop) in AsyncStorage
+        if (result.shop) {
+          await AsyncStorage.setItem('vendor_data', JSON.stringify({
+            user: result.user,
+            shop: {
+              id: result.shop.id,
+              name: result.shop.name,
+              storeName: result.shop.name,
+              owner_name: result.shop.owner_name,
+              email: result.shop.email,
+              mobile_number: result.shop.mobile_number,
+              is_active: result.shop.is_active,
+              ...result.shop,
+            },
+          }));
+          console.log('[AuthContext] Vendor data stored:', {
+            userId: result.user.id,
+            shopId: result.shop.id,
+            shopName: result.shop.name,
+          });
+        } else {
+          // Store user data even if shop not found
+          await AsyncStorage.setItem('vendor_data', JSON.stringify({
+            user: result.user,
+            shop: null,
+          }));
+          console.warn('[AuthContext] Shop not found for vendor, user data stored without shop');
+        }
+
         return { success: true };
       }
 
-      if (result.success && result.data) {
-        setUser(result.data.user);
-        return { success: true };
-      }
-
+      // Return error if login failed
       return {
         success: false,
-        error: result.error?.message || 'Sign in failed',
+        error: result.error || 'Sign in failed',
       };
     } catch (error: any) {
-      // Network or unexpected failure: still allow navigation to keep UX unblocked.
-      setUser({
-        id: 'offline-user',
-        name: email || 'Offline User',
-        phone: '',
-        email,
-      });
+      // Return network error to be handled by the login screen
       return {
-        success: true,
+        success: false,
+        error: error.message || 'Network request failed. Please check your connection.',
       };
     } finally {
       setIsLoading(false);
@@ -137,6 +193,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     try {
+      // Sign out from Supabase Auth
+      await supabase.auth.signOut();
+      // Also clear backend token if exists
       await apiSignOut();
       setUser(null);
       // Clear vendor data from session storage

@@ -200,7 +200,12 @@ export default function ProductDetailsScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.imageContainer}>
-          <Image source={getImageSource(product.image)} style={styles.productImage} />
+          <Image 
+            source={getImageSource(product.image, product.name, product.category)} 
+            style={styles.productImage}
+            defaultSource={require('../assets/images/icon.png')}
+            resizeMode="cover"
+          />
         </View>
 
         <View style={styles.content}>

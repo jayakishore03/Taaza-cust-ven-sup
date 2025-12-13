@@ -9,7 +9,10 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "web": {
       "bundler": "metro",
@@ -32,7 +35,10 @@
       }
     },
     "android": {
-      "package": "com.taaza.app"
+      "package": "com.taaza.app",
+      "permissions": [],
+      "blockedPermissions": [],
+      "allowBackup": true
     },
     "splash": {
       "image": "./assets/images/taaza.png",

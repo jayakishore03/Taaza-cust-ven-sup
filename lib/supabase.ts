@@ -25,6 +25,7 @@ const createSafeSupabaseProxy = (): SupabaseClient => {
   return new Proxy({} as SupabaseClient, {
     get(target, prop) {
       if (!supabaseClient) {
+        console.error('⚠️ Supabase client not initialized!');
         // Return a mock object that won't crash the app
         if (prop === 'auth') {
           return {
@@ -42,6 +43,20 @@ const createSafeSupabaseProxy = (): SupabaseClient => {
               unsubscribe: () => {},
             }),
           };
+        }
+        if (prop === 'from') {
+          return () => ({
+            select: () => ({ 
+              eq: () => ({ 
+                order: () => ({ data: [], error: { message: 'Supabase not configured' } }),
+                data: [], 
+                error: { message: 'Supabase not configured' } 
+              }),
+              order: () => ({ data: [], error: { message: 'Supabase not configured' } }),
+              data: [], 
+              error: { message: 'Supabase not configured' } 
+            }),
+          });
         }
         return () => {};
       }

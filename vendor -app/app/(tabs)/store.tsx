@@ -12,118 +12,222 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import Constants from 'expo-constants';
-import { getServices, saveServices, Service } from '../../services/api';
+import { 
+  getAllProducts, 
+  getVendorShopId, 
+  syncProductToShop,
+  type Product 
+} from '../../services/products';
+import { API_CONFIG } from '../../config/api';
+import { getImageSource } from '../../utils/imageHelper';
 
-// Default product list
-const DEFAULT_PRODUCTS = {
-  '🍗 Whole': true,
-  '🍖 Legs': true,
-  '🍗 Breast': true,
-  '🍖 Wings': true,
-  '🍗 Thighs': true,
-  '🍖 Mutton': false,
-  '🍗 Goat Meat': false,
-  '🍖 Fish': false,
-};
-
-const DEFAULT_RATES = {
-  '🍗 Whole': '180',
-  '🍖 Legs': '220',
-  '🍗 Breast': '250',
-  '🍖 Wings': '200',
-  '🍗 Thighs': '210',
-  '🍖 Mutton': '600',
-  '🍗 Goat Meat': '550',
-  '🍖 Fish': '300',
-};
+interface ProductState {
+  id: string;
+  name: string;
+  category: string;
+  is_available: boolean;
+  price_per_kg: number;
+  image_url: string;
+}
 
 export default function StoreScreen() {
-  const [services, setServices] = useState(DEFAULT_PRODUCTS);
-  const [rates, setRates] = useState(DEFAULT_RATES);
+  const [products, setProducts] = useState<ProductState[]>([]);
+  const [prices, setPrices] = useState<Record<string, string>>({});
   const [focusedInput, setFocusedInput] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [shopId, setShopId] = useState<string | null>(null);
 
-  // Load rates from backend on mount
+  // Load products from Supabase on mount
   useEffect(() => {
-    loadRates();
+    loadProducts();
   }, []);
 
-  const loadRates = async () => {
+  const loadProducts = async () => {
     try {
       setLoading(true);
-      const backendServices = await getServices();
       
-      if (backendServices && backendServices.length > 0) {
-        // Map backend services to our local state
-        const newRates: Record<string, string> = { ...DEFAULT_RATES };
-        const newServices: Record<string, boolean> = { ...DEFAULT_PRODUCTS };
-        
-        backendServices.forEach((service: Service) => {
-          if (service.name in DEFAULT_RATES) {
-            newRates[service.name] = service.price.toString();
-            newServices[service.name] = service.is_active !== false;
+      // Get vendor's shop ID
+      const vendorShopId = await getVendorShopId();
+      setShopId(vendorShopId);
+
+      // Get all products from Supabase
+      const allProducts = await getAllProducts();
+      
+      if (allProducts && allProducts.length > 0) {
+        // Map products to our state
+        // Load all products from customer app's Supabase (base catalog)
+        // Prices will be set by vendor, starting from empty
+        const productStates: ProductState[] = allProducts.map((product) => ({
+          id: product.id,
+          name: product.name,
+          category: product.category,
+          // If product has shop_id matching vendor, use its is_available status
+          // Otherwise, start as not available
+          is_available: product.shop_id === vendorShopId ? (product.is_available || false) : false,
+          // Start with 0 price - vendor will set their own price
+          price_per_kg: product.shop_id === vendorShopId ? (product.price_per_kg || 0) : 0,
+          image_url: product.image_url,
+        }));
+
+        // Initialize prices - start with empty/0 for all products
+        // Vendors will set their own prices
+        const initialPrices: Record<string, string> = {};
+        productStates.forEach((product) => {
+          // Only use existing price if it belongs to this vendor's shop
+          // Otherwise start with empty/0
+          let priceValue = '';
+          if (product.shop_id === vendorShopId && product.price_per_kg && product.price_per_kg > 0) {
+            // Use existing price for this vendor's shop
+            priceValue = product.price_per_kg.toString().replace(/\.?0+$/, '');
+            if (priceValue.includes('.') && priceValue.endsWith('.')) {
+              priceValue = priceValue.slice(0, -1);
+            }
           }
+          initialPrices[product.id] = priceValue;
         });
+
+        console.log('[StoreScreen] Loaded products:', productStates.length);
+        console.log('[StoreScreen] Initialized prices:', Object.keys(initialPrices).length, 'products');
+        if (__DEV__) {
+          // Log first few prices for debugging
+          const samplePrices = Object.entries(initialPrices).slice(0, 3);
+          samplePrices.forEach(([id, price]) => {
+            const product = productStates.find(p => p.id === id);
+            console.log(`[StoreScreen] Product: ${product?.name} - Price: ₹${price}/kg`);
+          });
+        }
         
-        setRates(newRates);
-        setServices(newServices);
+        setProducts(productStates);
+        setPrices(initialPrices);
+      } else {
+        Alert.alert('Info', 'No products found in the system. Please contact support.');
       }
     } catch (error) {
-      console.error('Error loading rates:', error);
-      // Keep default rates if loading fails
+      console.error('Error loading products:', error);
+      Alert.alert('Error', 'Failed to load products. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleService = (serviceName: string) => {
-    setServices((prev) => ({
-      ...prev,
-      [serviceName]: !prev[serviceName],
-    }));
+  const toggleProductAvailability = (productId: string) => {
+    setProducts((prev) =>
+      prev.map((product) =>
+        product.id === productId
+          ? { ...product, is_available: !product.is_available }
+          : product
+      )
+    );
   };
 
-  const updateRate = (serviceName: string, value: string) => {
-    // Allow empty string or numeric only
-    if (/^\d*$/.test(value)) {
-      setRates((prev) => ({
+  const updatePrice = (productId: string, value: string) => {
+    // Remove leading zeros and allow empty string or numeric only
+    let cleanedValue = value;
+    
+    // Remove leading zeros (but keep single zero or decimal point)
+    if (cleanedValue.length > 1 && cleanedValue.startsWith('0') && !cleanedValue.startsWith('0.')) {
+      cleanedValue = cleanedValue.replace(/^0+/, '') || '0';
+    }
+    
+    // Allow empty string or numeric only (including decimals)
+    if (cleanedValue === '' || /^\d*\.?\d*$/.test(cleanedValue)) {
+      setPrices((prev) => ({
         ...prev,
-        [serviceName]: value,
+        [productId]: cleanedValue,
       }));
     }
   };
 
   const handleSave = async () => {
+    if (!shopId) {
+      Alert.alert('Error', 'Shop ID not found. Please log in again.');
+      return;
+    }
+
     try {
       setSaving(true);
       
-      // Prepare services data for backend
-      const servicesToSave: Service[] = Object.entries(services)
-        .filter(([_, enabled]) => enabled) // Only include enabled services
-        .map(([name, enabled]) => ({
-          name,
-          description: `Price per kg for ${name}`,
-          price: parseFloat(rates[name] || '0'),
-          duration_hours: 24,
-        }));
+      // Update all products
+      const updatePromises = products.map(async (product) => {
+        // Get price from state (user input)
+        const priceString = prices[product.id] || '';
+        const pricePerKg = priceString ? parseFloat(priceString) : 0;
+        
+        console.log(`[StoreScreen] Saving product: ${product.name}`, {
+          productId: product.id,
+          priceString,
+          pricePerKg,
+          isAvailable: product.is_available,
+        });
+        
+        // Validate price if product is available
+        if (product.is_available && (isNaN(pricePerKg) || pricePerKg <= 0)) {
+          return { 
+            success: false, 
+            product: product.name, 
+            error: `Price is required when product is available. Please enter a price greater than 0.` 
+          };
+        }
+        
+        // Use the entered price, or 0 if product is not available
+        const finalPrice = product.is_available ? pricePerKg : 0;
 
-      const result = await saveServices(servicesToSave);
+        // Sync product to shop (updates both availability and price)
+        // This will save to Supabase and reflect in customer app
+        const result = await syncProductToShop(
+          shopId,
+          product.id,
+          product.is_available,
+          finalPrice
+        );
+        
+        if (!result.success) {
+          console.error(`[StoreScreen] Failed to save ${product.name}:`, result.error);
+        }
+        
+        return { 
+          success: result.success, 
+          product: product.name, 
+          error: result.error 
+        };
+      });
+
+      const results = await Promise.all(updatePromises);
+      const failed = results.filter((r) => !r.success);
       
-      if (result.success) {
-        Alert.alert('Success', result.message);
+      if (failed.length === 0) {
+        Alert.alert('Success', 'All products updated successfully! Prices will now reflect in the customer app.');
+        // Reload products to reflect changes from Supabase
+        await loadProducts();
       } else {
-        Alert.alert('Error', result.message);
+        const failedNames = failed.map((f) => `${f.product} (${f.error})`).join('\n');
+        Alert.alert(
+          'Partial Success',
+          `Updated ${results.length - failed.length} products.\n\nFailed:\n${failedNames}`
+        );
+        // Still reload to get updated data
+        await loadProducts();
       }
     } catch (error: any) {
-      console.error('Error saving rates:', error);
-      Alert.alert('Error', 'Failed to save rates. Please try again.');
+      console.error('Error saving products:', error);
+      Alert.alert('Error', error.message || 'Failed to save products. Please try again.');
     } finally {
       setSaving(false);
     }
   };
+
+  // Group products by category
+  const productsByCategory = products.reduce((acc, product) => {
+    if (!acc[product.category]) {
+      acc[product.category] = [];
+    }
+    acc[product.category].push(product);
+    return acc;
+  }, {} as Record<string, ProductState[]>);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -150,59 +254,114 @@ export default function StoreScreen() {
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#111111" />
-            <Text style={styles.loadingText}>Loading rates...</Text>
+            <Text style={styles.loadingText}>Loading products...</Text>
           </View>
         ) : (
           <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Select Meat Products You Sell</Text>
-            {Object.entries(services).map(([service, enabled]) => (
-              <View key={service} style={styles.serviceRow}>
-                <Text style={styles.serviceText}>{service}</Text>
-                <Switch
-                  value={enabled}
-                  onValueChange={() => toggleService(service)}
-                  thumbColor={enabled ? '#111111' : '#f4f3f4'}
-                  trackColor={{ false: '#767577', true: '#a3a3a3' }}
-                />
+            {Object.keys(productsByCategory).length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>No products found</Text>
+                <TouchableOpacity onPress={loadProducts} style={styles.refreshButton}>
+                  <Text style={styles.refreshButtonText}>Refresh</Text>
+                </TouchableOpacity>
               </View>
-            ))}
-          </View>
+            ) : (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Manage Products & Prices</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Set your prices per kg for each product. Toggle ON to make products available. 
+                  Changes will be saved to Supabase and immediately reflect in the customer app.
+                </Text>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Product Rates (₹ per kg)</Text>
+                {Object.entries(productsByCategory).map(([category, categoryProducts]) => (
+                  <View key={category} style={styles.categorySection}>
+                    <Text style={styles.categoryTitle}>{category}</Text>
+                    {categoryProducts.map((product) => {
+                      const isFocused = focusedInput === product.id;
+                      return (
+                        <View key={product.id} style={styles.productCard}>
+                          {/* Product Image */}
+                          <Image
+                            source={getImageSource(product.image_url, product.name, product.category)}
+                            style={styles.productImage}
+                            resizeMode="cover"
+                            defaultSource={require('../../assets/images/taaza.png')}
+                            onError={() => {
+                              // Image failed to load, will use defaultSource
+                              if (__DEV__) {
+                                console.warn('[StoreScreen] Image failed to load:', product.name, product.image_url);
+                              }
+                            }}
+                          />
+                          
+                          {/* Product Info Section */}
+                          <View style={styles.productContent}>
+                            {/* Product Name and Availability Badge */}
+                            <View style={styles.productHeader}>
+                              <Text style={styles.productName}>{product.name}</Text>
+                              {product.is_available && (
+                                <View style={styles.availableBadgeContainer}>
+                                  <Text style={styles.availableBadge}>Available</Text>
+                                </View>
+                              )}
+                            </View>
 
-            {Object.entries(rates).map(([service, rate]) => {
-              const isFocused = focusedInput === service;
-              return (
-                <View key={`${service}-rate`} style={styles.rateRow}>
-                  <Text style={styles.serviceText}>{service}</Text>
-                  <View style={[styles.rateInputContainer, isFocused && styles.rateInputFocused]}>
-                    <Text style={styles.currencySymbol}>₹</Text>
-                    <TextInput
-                      style={styles.rateInput}
-                      keyboardType="numeric"
-                      value={rate}
-                      onChangeText={(text) => updateRate(service, text)}
-                      placeholder="0"
-                      maxLength={5}
-                      onFocus={() => setFocusedInput(service)}
-                      onBlur={() => setFocusedInput(null)}
-                      selectionColor="#111"
-                      returnKeyType="done"
-                      blurOnSubmit={true}
-                      importantForAutofill="no"
-                    />
+                            {/* Price Input */}
+                            <View style={styles.priceSection}>
+                              <Text style={styles.priceLabel}>Price per kg:</Text>
+                              <View style={[styles.rateInputContainer, isFocused && styles.rateInputFocused]}>
+                                <Text style={styles.currencySymbol}>₹</Text>
+                                <TextInput
+                                  style={styles.rateInput}
+                                  keyboardType="decimal-pad"
+                                  value={prices[product.id] || ''}
+                                  onChangeText={(text) => updatePrice(product.id, text)}
+                                  placeholder="Enter price"
+                                  maxLength={10}
+                                  onFocus={() => setFocusedInput(product.id)}
+                                  onBlur={() => {
+                                    setFocusedInput(null);
+                                    // Validate price on blur - if empty and product is available, show warning
+                                    const currentPrice = prices[product.id];
+                                    if (product.is_available && (!currentPrice || parseFloat(currentPrice || '0') <= 0)) {
+                                      // Don't auto-fill, let user enter price
+                                    }
+                                  }}
+                                  selectionColor="#111"
+                                  returnKeyType="done"
+                                  blurOnSubmit={true}
+                                  importantForAutofill="no"
+                                />
+                              </View>
+                            </View>
+
+                            {/* Availability Toggle */}
+                            <View style={styles.availabilitySection}>
+                              <Text style={styles.availabilityLabel}>
+                                {product.is_available ? 'Available' : 'Not Available'}
+                              </Text>
+                              <Switch
+                                value={product.is_available}
+                                onValueChange={() => toggleProductAvailability(product.id)}
+                                thumbColor={product.is_available ? '#111111' : '#f4f3f4'}
+                                trackColor={{ false: '#767577', true: '#4CAF50' }}
+                              />
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
                   </View>
-                </View>
-              );
-            })}
+                ))}
 
-            <Text style={styles.infoText}>
-              Update the rates for each meat product per kilogram. Only numeric values are accepted.
-            </Text>
-          </View>
-        </ScrollView>
+                <Text style={styles.infoText}>
+                  💡 Set your prices per kilogram for each product. Prices are saved to Supabase and 
+                  will immediately appear in the customer app when they select your shop. 
+                  Products must have a price greater than 0 to be available.
+                </Text>
+              </View>
+            )}
+          </ScrollView>
         )}
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -300,13 +459,13 @@ const styles = StyleSheet.create({
   rateInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F9FAFB',
     borderRadius: 8,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#D1D5DB',
-    paddingHorizontal: 10,
-    height: 40,
-    width: 90,
+    paddingHorizontal: 12,
+    height: 44,
+    minWidth: 100,
   },
   rateInputFocused: {
     borderColor: '#111111',
@@ -347,5 +506,118 @@ const styles = StyleSheet.create({
   },
   saveButtonDisabled: {
     opacity: 0.6,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#6B7280',
+    marginBottom: 16,
+  },
+  refreshButton: {
+    backgroundColor: '#111111',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  refreshButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  categorySection: {
+    marginBottom: 24,
+  },
+  categoryTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#374151',
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  productCard: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    marginBottom: 16,
+    overflow: 'hidden',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  productImage: {
+    width: 120,
+    height: 120,
+    backgroundColor: '#F3F4F6',
+    borderTopLeftRadius: 16,
+    borderBottomLeftRadius: 16,
+  },
+  productContent: {
+    flex: 1,
+    padding: 16,
+    justifyContent: 'space-between',
+  },
+  productHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  productName: {
+    fontSize: 18,
+    color: '#111111',
+    fontWeight: '600',
+    flex: 1,
+  },
+  availableBadgeContainer: {
+    marginLeft: 8,
+  },
+  availableBadge: {
+    fontSize: 11,
+    color: '#4CAF50',
+    fontWeight: '700',
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  priceSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  priceLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 20,
+    fontStyle: 'italic',
+  },
+  availabilitySection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  availabilityLabel: {
+    fontSize: 14,
+    color: '#374151',
+    fontWeight: '500',
   },
 });

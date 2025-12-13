@@ -274,10 +274,10 @@ export default function Step4Documents() {
         </TouchableOpacity>
 
         {/* Shop License Upload */}
-        <Text style={styles.label}>🏪 Shop License / Trade License</Text>
+        <Text style={styles.label}>🏪 Shop License / Trade License (Optional)</Text>
         <TouchableOpacity style={styles.uploadBtn} onPress={() => pickFile(setShopLicenseFile, 'shopLicense')}>
           <Text style={shopLicenseFile ? styles.fileName : styles.placeholderText}>
-            {shopLicenseFile ? shopLicenseFile.name : 'Upload Shop License for shop'}
+            {shopLicenseFile ? shopLicenseFile.name : 'Upload Shop License / Trade License (Optional)'}
           </Text>
         </TouchableOpacity>
 

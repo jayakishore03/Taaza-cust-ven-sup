@@ -184,8 +184,10 @@ export default function CartScreen() {
           return (
             <View key={item.product.id} style={styles.cartItem}>
               <Image
-                source={getImageSource(item.product.image)}
+                source={getImageSource(item.product.image, item.product.name, item.product.category)}
                 style={styles.productImage}
+                defaultSource={require('../../assets/images/icon.png')}
+                resizeMode="cover"
               />
               
               <View style={styles.productInfo}>
