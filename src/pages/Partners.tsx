@@ -53,11 +53,11 @@ const Partners = () => {
   // Filter partners based on search
   const filteredPartners = partners.filter((partner) =>
     searchQuery === '' ||
-    partner.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    partner.owner_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    partner.mobile_number.includes(searchQuery) ||
-    partner.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    partner.address.toLowerCase().includes(searchQuery.toLowerCase())
+    partner.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    partner.owner_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    partner.mobile_number?.includes(searchQuery) ||
+    partner.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    partner.address?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   // Format date
@@ -190,17 +190,17 @@ const Partners = () => {
 
                 <div className="p-6">
                   {/* Shop Name */}
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">{partner.name}</h3>
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">{partner.name || 'Unnamed Shop'}</h3>
 
                   {/* Owner Information */}
                   <div className="flex items-start gap-3 mb-4">
                     <div className="w-12 h-12 bg-gradient-to-br from-red-600 to-red-800 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0">
-                      {partner.owner_name.charAt(0).toUpperCase()}
+                      {partner.owner_name ? partner.owner_name.charAt(0).toUpperCase() : 'S'}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 flex items-center gap-1">
                         <User className="w-4 h-4" />
-                        {partner.owner_name}
+                        {partner.owner_name || 'N/A'}
                       </p>
                       <p className="text-xs text-gray-500 mt-1">Owner</p>
                     </div>
@@ -210,15 +210,15 @@ const Partners = () => {
                   <div className="space-y-2 mb-4">
                     <p className="text-sm text-gray-700 flex items-center gap-2">
                       <Phone className="w-4 h-4 text-gray-500" />
-                      <span className="truncate">{partner.mobile_number}</span>
+                      <span className="truncate">{partner.mobile_number || 'N/A'}</span>
                     </p>
                     <p className="text-sm text-gray-700 flex items-center gap-2">
                       <Mail className="w-4 h-4 text-gray-500" />
-                      <span className="truncate">{partner.email}</span>
+                      <span className="truncate">{partner.email || 'N/A'}</span>
                     </p>
                     <p className="text-sm text-gray-700 flex items-start gap-2">
                       <MapPin className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
-                      <span className="line-clamp-2">{partner.address}</span>
+                      <span className="line-clamp-2">{partner.address || 'No address provided'}</span>
                     </p>
                   </div>
 
@@ -319,10 +319,10 @@ const Partners = () => {
                       <h4 className="text-lg font-semibold text-gray-900 mb-4">Owner Information</h4>
                       <div className="flex items-center gap-4">
                         <div className="w-16 h-16 bg-gradient-to-br from-red-600 to-red-800 rounded-full flex items-center justify-center text-white text-2xl font-bold">
-                          {partner.owner_name.charAt(0).toUpperCase()}
+                          {partner.owner_name ? partner.owner_name.charAt(0).toUpperCase() : 'S'}
                         </div>
                         <div>
-                          <p className="text-xl font-bold text-gray-900">{partner.owner_name}</p>
+                          <p className="text-xl font-bold text-gray-900">{partner.owner_name || 'N/A'}</p>
                           <p className="text-sm text-gray-600">Shop Owner</p>
                         </div>
                       </div>
@@ -336,21 +336,21 @@ const Partners = () => {
                           <Phone className="w-5 h-5 text-gray-500" />
                           <div>
                             <p className="text-xs text-gray-600">Phone</p>
-                            <p className="text-sm font-medium text-gray-900">{partner.mobile_number}</p>
+                            <p className="text-sm font-medium text-gray-900">{partner.mobile_number || 'N/A'}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                           <Mail className="w-5 h-5 text-gray-500" />
                           <div>
                             <p className="text-xs text-gray-600">Email</p>
-                            <p className="text-sm font-medium text-gray-900">{partner.email}</p>
+                            <p className="text-sm font-medium text-gray-900">{partner.email || 'N/A'}</p>
                           </div>
                         </div>
                         <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg md:col-span-2">
                           <MapPin className="w-5 h-5 text-gray-500 mt-0.5" />
                           <div>
                             <p className="text-xs text-gray-600">Address</p>
-                            <p className="text-sm font-medium text-gray-900">{partner.address}</p>
+                            <p className="text-sm font-medium text-gray-900">{partner.address || 'No address provided'}</p>
                           </div>
                         </div>
                       </div>
