@@ -34,16 +34,24 @@ const SHOP_TYPES = [
 
 export default function Step1BasicDetails() {
   const router = useRouter();
-  const { updateRegistrationData } = useRegistration();
-  const [shopType, setShopType] = useState<string | null>(null);
+  const { registrationData, updateRegistrationData } = useRegistration();
+  const [shopType, setShopType] = useState<string | null>(registrationData.shopType || null);
   const [form, setForm] = useState({
-    ownerName: '',
-    storeName: '',
-    storePhotos: [],
-    location: null,
-    shopType: '',
+    ownerName: registrationData.ownerName || '',
+    storeName: registrationData.storeName || '',
+    shopPlot: registrationData.shopPlot || '',
+    floor: registrationData.floor || '',
+    building: registrationData.building || '',
+    pincode: registrationData.pincode || '',
+    storePhotos: registrationData.storePhotos || [],
+    location: registrationData.location || null,
+    shopType: registrationData.shopType || '',
   });
-  const [locationDetails, setLocationDetails] = useState({ area: '', city: '' });
+  const [locationDetails, setLocationDetails] = useState({ 
+    area: registrationData.area || '', 
+    city: registrationData.city || '', 
+    pincode: registrationData.pincode || '' 
+  });
   const [isLocationLoading, setIsLocationLoading] = useState(true);
 
   const getLocation = async () => {
@@ -63,11 +71,16 @@ export default function Step1BasicDetails() {
 
     let geocode = await Location.reverseGeocodeAsync(location.coords);
     if (geocode && geocode.length > 0) {
-      const { subregion, city } = geocode[0];
+      const { subregion, city, postalCode } = geocode[0];
       setLocationDetails({
         area: subregion || '',
         city: city || '',
+        pincode: postalCode || '',
       });
+      // Auto-fill pincode if available from geocoding
+      if (postalCode) {
+        setForm((f) => ({ ...f, pincode: postalCode }));
+      }
     }
     setIsLocationLoading(false);
   };
@@ -115,8 +128,17 @@ export default function Step1BasicDetails() {
   };
 
   const handleNext = async () => {
+    // Validate required fields
     if (!form.ownerName || !form.storeName) {
-      Alert.alert('Incomplete Form', 'Please fill in all required details before proceeding.');
+      Alert.alert('Incomplete Form', 'Please fill in owner name and shop name before proceeding.');
+      return;
+    }
+    if (!form.shopPlot || !form.building) {
+      Alert.alert('Incomplete Form', 'Please fill in shop/plot number and building name before proceeding.');
+      return;
+    }
+    if (!form.pincode || form.pincode.length < 6) {
+      Alert.alert('Incomplete Form', 'Please enter a valid 6-digit pincode before proceeding.');
       return;
     }
     
@@ -124,6 +146,10 @@ export default function Step1BasicDetails() {
     await updateRegistrationData({
       ownerName: form.ownerName,
       storeName: form.storeName,
+      shopPlot: form.shopPlot,
+      floor: form.floor,
+      building: form.building,
+      pincode: form.pincode,
       location: form.location,
       area: locationDetails.area,
       city: locationDetails.city,
@@ -295,6 +321,50 @@ export default function Step1BasicDetails() {
           value={form.storeName}
           onChangeText={(t) => setForm((f) => ({ ...f, storeName: t }))}
         />
+
+        <View style={styles.sectionHeader}>
+          <Feather name="map-pin" size={18} color="#000" />
+          <Text style={styles.sectionHeaderText}>Shop Address</Text>
+        </View>
+        <TextInput
+          style={styles.input}
+          placeholder="Shop/Plot Number *"
+          placeholderTextColor="#999"
+          value={form.shopPlot}
+          onChangeText={(t) => setForm((f) => ({ ...f, shopPlot: t }))}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Floor (Optional)"
+          placeholderTextColor="#999"
+          value={form.floor}
+          onChangeText={(t) => setForm((f) => ({ ...f, floor: t }))}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Building/Complex Name *"
+          placeholderTextColor="#999"
+          value={form.building}
+          onChangeText={(t) => setForm((f) => ({ ...f, building: t }))}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Pincode *"
+          placeholderTextColor="#999"
+          keyboardType="number-pad"
+          maxLength={6}
+          value={form.pincode}
+          onChangeText={(t) => setForm((f) => ({ ...f, pincode: t.replace(/[^0-9]/g, '') }))}
+        />
+        {locationDetails.pincode && !form.pincode && (
+          <TouchableOpacity 
+            style={styles.autoFillButton}
+            onPress={() => setForm((f) => ({ ...f, pincode: locationDetails.pincode }))}
+          >
+            <Feather name="map-pin" size={16} color="#3B82F6" />
+            <Text style={styles.autoFillText}>Use detected pincode: {locationDetails.pincode}</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.photosBlock}>
           <View style={styles.sectionHeader}>
@@ -662,5 +732,23 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  autoFillButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+  },
+  autoFillText: {
+    color: '#3B82F6',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });

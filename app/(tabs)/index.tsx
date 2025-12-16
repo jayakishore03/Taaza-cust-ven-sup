@@ -417,12 +417,33 @@ export default function HomeScreen() {
                   onPress={() => handleShopSelect(shop)}
                   activeOpacity={0.85}
                 >
-                  <Image source={{ uri: shop.image }} style={styles.shopImage} />
+                  <Image 
+                    source={
+                      shop.image && shop.image.startsWith('http') 
+                        ? { uri: shop.image } 
+                        : require('../../assets/images/icon.png')
+                    }
+                    style={styles.shopImage} 
+                    defaultSource={require('../../assets/images/icon.png')}
+                    onError={(error) => {
+                      console.warn('[HomeScreen] Shop image failed to load:', shop.name, shop.image);
+                    }}
+                    resizeMode="cover"
+                  />
                   <View style={styles.shopInfo}>
                     <View style={styles.shopHeader}>
                       <Text style={styles.shopName}>{shop.name}</Text>
                     </View>
+                    {shop.vendor?.ownerName && (
+                      <Text style={styles.shopOwner}>Owner: {shop.vendor.ownerName}</Text>
+                    )}
                     <Text style={styles.shopAddress}>{shop.address}</Text>
+                    {shop.vendor?.mobileNumber && (
+                      <Text style={styles.shopContact}>📞 {shop.vendor.mobileNumber}</Text>
+                    )}
+                    {shop.vendor?.shopType && (
+                      <Text style={styles.shopType}>🏪 {shop.vendor.shopType}</Text>
+                    )}
                     <Text style={styles.shopDistance}>{shop.distance} • Open now</Text>
                     <Text style={styles.shopAction}>View items</Text>
                   </View>
@@ -434,11 +455,29 @@ export default function HomeScreen() {
           <>
             <View style={styles.section}>
               <View style={styles.selectedShopCard}>
-                <Image source={{ uri: selectedShop.image }} style={styles.selectedShopImage} />
+                <Image 
+                  source={
+                    selectedShop.image && selectedShop.image.startsWith('http') 
+                      ? { uri: selectedShop.image } 
+                      : require('../../assets/images/icon.png')
+                  }
+                  style={styles.selectedShopImage} 
+                  defaultSource={require('../../assets/images/icon.png')}
+                  onError={(error) => {
+                    console.warn('[HomeScreen] Selected shop image failed to load:', selectedShop.name, selectedShop.image);
+                  }}
+                  resizeMode="cover"
+                />
                 <View style={styles.selectedShopInfo}>
                   <Text style={styles.selectedShopLabel}>Selected Shop</Text>
                   <Text style={styles.selectedShopName}>{selectedShop.name}</Text>
+                  {selectedShop.vendor?.ownerName && (
+                    <Text style={styles.selectedShopOwner}>Owner: {selectedShop.vendor.ownerName}</Text>
+                  )}
                   <Text style={styles.selectedShopDetails}>{selectedShop.address} • {selectedShop.distance}</Text>
+                  {selectedShop.vendor?.mobileNumber && (
+                    <Text style={styles.selectedShopContact}>📞 {selectedShop.vendor.mobileNumber}</Text>
+                  )}
                 </View>
                 <TouchableOpacity style={styles.changeShopButton} onPress={handleChangeShop}>
                   <Text style={styles.changeShopText}>Change</Text>
@@ -879,10 +918,27 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     flex: 1,
   },
+  shopOwner: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 4,
+    fontWeight: '500',
+  },
   shopAddress: {
     fontSize: 13,
     color: '#6B7280',
     marginTop: 6,
+  },
+  shopContact: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  shopType: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    marginTop: 2,
+    textTransform: 'capitalize',
   },
   shopDistance: {
     fontSize: 12,
@@ -928,7 +984,18 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     marginTop: 4,
   },
+  selectedShopOwner: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 2,
+    fontWeight: '500',
+  },
   selectedShopDetails: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  selectedShopContact: {
     fontSize: 12,
     color: '#6B7280',
     marginTop: 4,

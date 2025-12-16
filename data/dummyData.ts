@@ -12,6 +12,22 @@ export interface Product {
   discountPercentage?: number;
 }
 
+export interface VendorDetails {
+  ownerName?: string;
+  shopName?: string;
+  email?: string;
+  mobileNumber?: string;
+  whatsappNumber?: string;
+  shopType?: string;
+  area?: string;
+  city?: string;
+  pincode?: string;
+  workingDays?: string[];
+  commonOpenTime?: string;
+  commonCloseTime?: string;
+  storePhotos?: string[];
+}
+
 export interface Shop {
   id: string;
   name: string;
@@ -20,6 +36,7 @@ export interface Shop {
   image: string;
   latitude?: number;
   longitude?: number;
+  vendor?: VendorDetails | null;
 }
 
 export interface OrderItem {

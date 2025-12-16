@@ -242,7 +242,19 @@ export default function OrdersScreen() {
         {(order.shopName || order.shopImage) && (
           <View style={styles.shopInfoContainer}>
             {order.shopImage && (
-              <Image source={{ uri: order.shopImage }} style={styles.shopImage} />
+              <Image 
+                source={
+                  order.shopImage && order.shopImage.startsWith('http') 
+                    ? { uri: order.shopImage } 
+                    : require('../../assets/images/icon.png')
+                }
+                style={styles.shopImage} 
+                defaultSource={require('../../assets/images/icon.png')}
+                onError={(error) => {
+                  console.warn('[OrdersScreen] Shop image failed to load:', order.shopName, order.shopImage);
+                }}
+                resizeMode="cover"
+              />
             )}
             <View style={styles.shopDetails}>
               {order.shopName && (

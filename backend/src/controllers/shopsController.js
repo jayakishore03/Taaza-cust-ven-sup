@@ -43,25 +43,99 @@ function formatDistance(distanceInKm) {
 }
 
 /**
- * Format shop for response
+ * Build address from vendor details
  */
-function formatShop(dbShop, userLat = null, userLon = null) {
+function buildAddressFromVendor(vendor) {
+  if (!vendor) return 'Address not available';
+  
+  const addressParts = [];
+  
+  // Add shop plot/building details
+  if (vendor.shop_plot) addressParts.push(vendor.shop_plot);
+  if (vendor.building) addressParts.push(vendor.building);
+  if (vendor.floor) addressParts.push(`Floor ${vendor.floor}`);
+  
+  // Add area
+  if (vendor.area) addressParts.push(vendor.area);
+  
+  // Add city
+  if (vendor.city) addressParts.push(vendor.city);
+  
+  // Add pincode
+  if (vendor.pincode) addressParts.push(vendor.pincode);
+  
+  return addressParts.length > 0 ? addressParts.join(', ') : 'Address not available';
+}
+
+/**
+ * Format shop for response
+ * NOTE: All vendor registration data is now stored in shops table
+ * Vendor parameter is optional and only used for backward compatibility
+ */
+function formatShop(dbShop, vendor = null, userLat = null, userLon = null) {
   let distance = dbShop.distance || '0 km';
   
   // Calculate distance if user location and shop coordinates are available
-  if (userLat !== null && userLon !== null && dbShop.latitude !== null && dbShop.longitude !== null) {
-    const distanceInKm = calculateDistance(userLat, userLon, dbShop.latitude, dbShop.longitude);
+  const shopLat = dbShop.latitude ? parseFloat(dbShop.latitude) : null;
+  const shopLon = dbShop.longitude ? parseFloat(dbShop.longitude) : null;
+  
+  if (userLat !== null && userLon !== null && shopLat !== null && shopLon !== null) {
+    const distanceInKm = calculateDistance(userLat, userLon, shopLat, shopLon);
     distance = formatDistance(distanceInKm);
+  }
+  
+  // Build address from shop data (all data is in shops table)
+  let address = dbShop.address;
+  if (!address || address === 'Address not available') {
+    // Build from shop table fields if address is not set
+    const addressParts = [];
+    if (dbShop.shop_plot) addressParts.push(dbShop.shop_plot);
+    if (dbShop.building) addressParts.push(dbShop.building);
+    if (dbShop.floor) addressParts.push(`Floor ${dbShop.floor}`);
+    if (dbShop.area) addressParts.push(dbShop.area);
+    if (dbShop.city) addressParts.push(dbShop.city);
+    if (dbShop.pincode) addressParts.push(dbShop.pincode);
+    
+    if (addressParts.length > 0) {
+      address = addressParts.join(', ');
+    } else {
+      address = SHOP_ADDRESSES[dbShop.id] || 'Address not available';
+    }
+  }
+  
+  // Use shop name
+  const shopName = dbShop.name;
+  
+  // Get shop image from shop store_photos array or image_url
+  let shopImage = dbShop.image_url;
+  if (dbShop.store_photos && Array.isArray(dbShop.store_photos) && dbShop.store_photos.length > 0) {
+    shopImage = dbShop.store_photos[0];
   }
   
   return {
     id: dbShop.id,
-    name: dbShop.name,
-    address: SHOP_ADDRESSES[dbShop.id] || 'Address not available',
+    name: shopName,
+    address,
     distance,
-    image: dbShop.image_url,
-    latitude: dbShop.latitude,
-    longitude: dbShop.longitude,
+    image: shopImage,
+    latitude: shopLat,
+    longitude: shopLon,
+    // Include vendor details from shops table (all registration data is in shops table)
+    vendor: {
+      ownerName: dbShop.owner_name || null,
+      shopName: dbShop.name || null,
+      email: dbShop.email || null,
+      mobileNumber: dbShop.mobile_number || null,
+      whatsappNumber: dbShop.whatsapp_number || null,
+      shopType: dbShop.shop_type || null,
+      area: dbShop.area || null,
+      city: dbShop.city || null,
+      pincode: dbShop.pincode || null,
+      workingDays: dbShop.working_days || [],
+      commonOpenTime: dbShop.common_open_time || null,
+      commonCloseTime: dbShop.common_close_time || null,
+      storePhotos: dbShop.store_photos || [],
+    },
   };
 }
 
@@ -75,17 +149,37 @@ export const getAllShops = async (req, res, next) => {
     const userLat = req.query.lat ? parseFloat(req.query.lat) : null;
     const userLon = req.query.lon ? parseFloat(req.query.lon) : null;
 
-    const { data, error } = await supabase
+    // Fetch shops - only show approved shops (is_approved = true)
+    // All vendor registration data is stored directly in shops table (no vendors table)
+    const { data: shopsData, error: shopsError } = await supabase
       .from('shops')
       .select('*')
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .eq('is_approved', true) // Only show approved shops
+      .order('created_at', { ascending: false });
 
-    if (error) {
-      throw error;
+    if (shopsError) {
+      console.error('[getAllShops] Error fetching shops:', shopsError);
+      throw shopsError;
     }
 
-    // Format shops with distance calculation
-    let shops = (data || []).map(shop => formatShop(shop, userLat, userLon));
+    // Debug: Log shop count
+    console.log('[getAllShops] Total approved active shops found:', shopsData?.length || 0);
+    if (shopsData && shopsData.length > 0) {
+      const userShops = shopsData.filter(s => s.user_id);
+      const hardcodedShops = shopsData.filter(s => s.id && (s.id.startsWith('shop-') || s.id === 'shop-1' || s.id === 'shop-2' || s.id === 'shop-3'));
+      console.log('[getAllShops] User-registered shops:', userShops.length);
+      console.log('[getAllShops] Hardcoded shops:', hardcodedShops.length);
+      console.log('[getAllShops] Shop IDs:', shopsData.map(s => ({ id: s.id, name: s.name, user_id: s.user_id })));
+    }
+
+    // Format ALL approved active shops with distance calculation
+    // IMPORTANT: shops table contains ALL vendor registration data
+    // - All shop details come from shops table (no need to join vendors table)
+    // - Only shops with is_active=true AND is_approved=true are displayed
+    let shops = (shopsData || []).map(shop => {
+      return formatShop(shop, null, userLat, userLon); // No vendor join needed
+    });
 
     // Sort by distance if user location is provided
     if (userLat !== null && userLon !== null) {
@@ -133,26 +227,36 @@ export const getShopById = async (req, res, next) => {
     const userLat = req.query.lat ? parseFloat(req.query.lat) : null;
     const userLon = req.query.lon ? parseFloat(req.query.lon) : null;
 
-    const { data, error } = await supabase
+    // Fetch shop
+    const { data: shopData, error: shopError } = await supabase
       .from('shops')
       .select('*')
       .eq('id', id)
       .eq('is_active', true)
       .single();
 
-    if (error) {
-      if (error.code === 'PGRST116') {
+    if (shopError) {
+      if (shopError.code === 'PGRST116') {
         return res.status(404).json({
           success: false,
           error: { message: 'Shop not found' },
         });
       }
-      throw error;
+      throw shopError;
+    }
+
+    // All vendor registration data is stored directly in shops table (no vendors table)
+    // Only show approved shops
+    if (!shopData.is_approved) {
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Shop not found or not approved' },
+      });
     }
 
     res.json({
       success: true,
-      data: formatShop(data, userLat, userLon),
+      data: formatShop(shopData, null, userLat, userLon),
     });
   } catch (error) {
     next(error);

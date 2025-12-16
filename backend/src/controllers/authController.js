@@ -916,3 +916,96 @@ export const resetPassword = async (req, res, next) => {
   }
 };
 
+/**
+ * Auto-confirm vendor email (for development)
+ * POST /api/auth/confirm-vendor-email
+ * This endpoint uses the service role key to auto-confirm vendor emails
+ */
+export const confirmVendorEmail = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Email is required' },
+      });
+    }
+
+    const sanitizedEmail = email.toLowerCase().trim();
+
+    // Use Supabase Admin API to find and update user
+    // List users with pagination to find the user by email
+    let foundUser = null;
+    let page = 1;
+    const perPage = 1000; // Max per page
+    
+    while (!foundUser) {
+      const { data: usersData, error: userError } = await supabaseAdmin.auth.admin.listUsers({
+        page,
+        perPage,
+      });
+      
+      if (userError) {
+        console.error('Error listing users:', userError);
+        return res.status(500).json({
+          success: false,
+          error: { message: 'Failed to find user' },
+        });
+      }
+
+      // Find user by email
+      foundUser = usersData.users.find(u => u.email === sanitizedEmail);
+
+      // If no more users or found the user, break
+      if (!usersData.users.length || foundUser) {
+        break;
+      }
+
+      // If we got less than perPage, we've reached the end
+      if (usersData.users.length < perPage) {
+        break;
+      }
+
+      page++;
+    }
+
+    if (!foundUser) {
+      return res.status(404).json({
+        success: false,
+        error: { message: 'User not found with this email' },
+      });
+    }
+
+    // Update user to confirm email using admin API
+    const { data: updatedUser, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+      foundUser.id,
+      {
+        email_confirm: true,
+      }
+    );
+
+    if (updateError) {
+      console.error('Error confirming email:', updateError);
+      return res.status(500).json({
+        success: false,
+        error: { message: updateError.message || 'Failed to confirm email' },
+      });
+    }
+
+    console.log(`✅ Email confirmed for vendor: ${sanitizedEmail}`);
+
+    res.json({
+      success: true,
+      message: 'Email confirmed successfully',
+      data: {
+        email: updatedUser.user.email,
+        emailConfirmed: updatedUser.user.email_confirmed_at !== null,
+      },
+    });
+  } catch (error) {
+    console.error('Confirm vendor email error:', error);
+    next(error);
+  }
+};
+

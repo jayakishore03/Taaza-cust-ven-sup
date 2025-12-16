@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -39,10 +40,40 @@ export default function Step2ContactDetails() {
   const [otpVerified, setOtpVerified] = useState<boolean>(false);
   const [sessionId, setSessionId] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const [resendCooldown, setResendCooldown] = useState<number>(0);
+  const cooldownIntervalRef = useRef<number | null>(null);
 
   const apiKey = '454c14ae-a073-11f0-b922-0200cd936042';
 
-  const sendOtp = async (mobileNumber: string) => {
+  // Cooldown timer effect
+  useEffect(() => {
+    if (resendCooldown > 0) {
+      cooldownIntervalRef.current = setInterval(() => {
+        setResendCooldown((prev) => {
+          if (prev <= 1) {
+            if (cooldownIntervalRef.current) {
+              clearInterval(cooldownIntervalRef.current);
+            }
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000) as unknown as number;
+    }
+
+    return () => {
+      if (cooldownIntervalRef.current) {
+        clearInterval(cooldownIntervalRef.current);
+      }
+    };
+  }, [resendCooldown]);
+
+  const sendOtp = async (mobileNumber: string, isResend: boolean = false) => {
+    if (!mobileNumber || mobileNumber.length < 10) {
+      Alert.alert('Invalid Number', 'Please enter a valid mobile number (at least 10 digits).');
+      return;
+    }
+
     setLoading(true);
     const url = `https://2factor.in/API/V1/${apiKey}/SMS/${mobileNumber}/AUTOGEN`;
     try {
@@ -51,14 +82,25 @@ export default function Step2ContactDetails() {
       if (data.Status === 'Success') {
         setSessionId(data.Details); // Save session ID
         setOtpRequested(true);
-        alert(`OTP sent to +${mobileNumber}`);
+        setOtp(''); // Clear previous OTP
+        setOtpVerified(false); // Reset verification status
+        setResendCooldown(30); // Set 30 second cooldown
+        Alert.alert('Success', `OTP ${isResend ? 'resent' : 'sent'} to +${mobileNumber}`);
       } else {
-        alert('Failed to send OTP. Please try again.');
+        Alert.alert('Failed', 'Failed to send OTP. Please try again.');
       }
     } catch (error) {
-      alert('Error sending OTP. Check your internet connection.');
+      Alert.alert('Error', 'Error sending OTP. Check your internet connection.');
     }
     setLoading(false);
+  };
+
+  const handleResendOtp = () => {
+    if (resendCooldown > 0) {
+      Alert.alert('Please Wait', `Please wait ${resendCooldown} seconds before resending OTP.`);
+      return;
+    }
+    sendOtp(form.mobileNumber, true);
   };
 
   const verifyOtp = async (mobileNumber: string, sessionId: string, otp: string) => {
@@ -194,6 +236,20 @@ export default function Step2ContactDetails() {
             >
               <Text style={styles.verifyOtpButtonText}>Verify OTP</Text>
             </TouchableOpacity>
+            
+            {/* Resend OTP Button */}
+            <View style={styles.resendContainer}>
+              <Text style={styles.resendText}>Didn't receive OTP? </Text>
+              <TouchableOpacity
+                onPress={handleResendOtp}
+                disabled={loading || resendCooldown > 0}
+                style={styles.resendButton}
+              >
+                <Text style={[styles.resendButtonText, (loading || resendCooldown > 0) && styles.resendButtonTextDisabled]}>
+                  {resendCooldown > 0 ? `Resend OTP (${resendCooldown}s)` : 'Resend OTP'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </>
         )}
 
@@ -511,5 +567,31 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.6,
+  },
+  resendContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  resendText: {
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  resendButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  resendButtonText: {
+    fontSize: 14,
+    color: '#3B82F6',
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
+  resendButtonTextDisabled: {
+    color: '#9CA3AF',
+    textDecorationLine: 'none',
   },
 });

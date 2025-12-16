@@ -363,3 +363,71 @@ export const getVendorProfile = async (req, res, next) => {
   }
 };
 
+/**
+ * Approve shop (Admin only)
+ * POST /api/vendor/approve/:shopId
+ * This endpoint approves a shop (all data is in shops table, no vendors table)
+ */
+export const approveVendor = async (req, res, next) => {
+  try {
+    const { shopId } = req.params; // Changed from vendorId to shopId
+    const { is_verified, is_approved } = req.body;
+
+    if (!shopId) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Shop ID is required' },
+      });
+    }
+
+    console.log('[approveVendor] Approving shop:', shopId);
+
+    // Get shop data (all vendor registration data is in shops table)
+    const { data: shop, error: shopError } = await supabase
+      .from('shops')
+      .select('*')
+      .eq('id', shopId)
+      .single();
+
+    if (shopError || !shop) {
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Shop not found' },
+      });
+    }
+
+    // Update shop approval status
+    const updateData = {};
+    if (is_verified !== undefined) updateData.is_verified = is_verified;
+    if (is_approved !== undefined) updateData.is_approved = is_approved;
+
+    const { data: updatedShop, error: updateError } = await supabase
+      .from('shops')
+      .update(updateData)
+      .eq('id', shopId)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('[approveVendor] Error updating shop:', updateError);
+      return res.status(500).json({
+        success: false,
+        error: { message: 'Failed to update shop status' },
+      });
+    }
+
+    console.log('[approveVendor] ✅ Shop approved:', updatedShop.id);
+
+    return res.json({
+      success: true,
+      data: {
+        shop: updatedShop,
+        message: 'Shop approved successfully',
+      },
+    });
+  } catch (error) {
+    console.error('[approveVendor] Exception:', error);
+    next(error);
+  }
+};
+

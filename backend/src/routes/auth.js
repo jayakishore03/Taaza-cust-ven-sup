@@ -3,7 +3,7 @@
  */
 
 import express from 'express';
-import { signUp, signIn, verifyAuthToken, sendPasswordResetOTP, verifyPasswordResetOTP, resetPassword, checkPhoneExists, cleanupOrphanedProfile } from '../controllers/authController.js';
+import { signUp, signIn, verifyAuthToken, sendPasswordResetOTP, verifyPasswordResetOTP, resetPassword, checkPhoneExists, cleanupOrphanedProfile, confirmVendorEmail } from '../controllers/authController.js';
 
 const router = express.Router();
 
@@ -30,6 +30,9 @@ router.post('/verify-reset-otp', verifyPasswordResetOTP);
 
 // Reset password - set new password (after OTP verification)
 router.post('/reset-password', resetPassword);
+
+// Auto-confirm vendor email (for development)
+router.post('/confirm-vendor-email', confirmVendorEmail);
 
 export default router;
 
