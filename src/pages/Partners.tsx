@@ -1,4 +1,4 @@
-import { Search, Store, Phone, MapPin, Mail, User, X, Eye, Edit, Loader2, AlertCircle } from 'lucide-react';
+import { Search, Store, Phone, MapPin, Mail, User, X, Eye, Edit, Loader2, AlertCircle, Upload, Image as ImageIcon, FileText, Save, Camera } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -13,6 +13,13 @@ interface Shop {
   created_at: string;
   rating?: number;
   shop_image_url?: string;
+  image_url?: string;
+  store_photos?: string[];
+  pan_document?: string;
+  gst_document?: string;
+  fssai_document?: string;
+  shop_license_document?: string;
+  aadhaar_document?: string;
 }
 
 const Partners = () => {
@@ -21,6 +28,9 @@ const Partners = () => {
   const [partners, setPartners] = useState<Shop[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [imageViewer, setImageViewer] = useState<{show: boolean; url: string; title: string}>({show: false, url: '', title: ''});
+  const [uploadModal, setUploadModal] = useState<{show: boolean; shopId: string; type: 'shop' | 'document'}>({show: false, shopId: '', type: 'shop'});
+  const [uploading, setUploading] = useState(false);
 
   // Fetch shops from Supabase
   useEffect(() => {
@@ -48,6 +58,83 @@ const Partners = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Handle image upload to Supabase Storage
+  const handleImageUpload = async (file: File, shopId: string, imageType: 'shop' | 'pan' | 'gst' | 'fssai' | 'license' | 'aadhaar') => {
+    try {
+      setUploading(true);
+
+      // Create a unique file name
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${shopId}_${imageType}_${Date.now()}.${fileExt}`;
+      const filePath = `shops/${shopId}/${fileName}`;
+
+      // Upload to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('shop-images')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('shop-images')
+        .getPublicUrl(filePath);
+
+      // Update database based on image type
+      let updateField = '';
+      switch (imageType) {
+        case 'shop':
+          updateField = 'image_url';
+          break;
+        case 'pan':
+          updateField = 'pan_document';
+          break;
+        case 'gst':
+          updateField = 'gst_document';
+          break;
+        case 'fssai':
+          updateField = 'fssai_document';
+          break;
+        case 'license':
+          updateField = 'shop_license_document';
+          break;
+        case 'aadhaar':
+          updateField = 'aadhaar_document';
+          break;
+      }
+
+      const { error: updateError } = await supabase
+        .from('shops')
+        .update({ [updateField]: publicUrl })
+        .eq('id', shopId);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // Refresh shops list
+      await fetchShops();
+      alert(`${imageType.toUpperCase()} image uploaded successfully!`);
+      setUploadModal({show: false, shopId: '', type: 'shop'});
+      
+    } catch (err: any) {
+      console.error('Error uploading image:', err);
+      alert(`Error uploading image: ${err.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // View image in modal
+  const viewImage = (url: string, title: string) => {
+    setImageViewer({show: true, url, title});
   };
 
   // Filter partners based on search
@@ -375,6 +462,131 @@ const Partners = () => {
                       </div>
                     </div>
 
+                    {/* Documents Section */}
+                    <div className="pt-6 border-t border-gray-200">
+                      <h4 className="text-lg font-semibold text-gray-900 mb-4">Documents</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {/* PAN Card */}
+                        <div className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                          <div className="flex items-center gap-2 mb-2">
+                            <FileText className="w-4 h-4 text-gray-500" />
+                            <p className="text-sm font-semibold text-gray-900">PAN Card</p>
+                          </div>
+                          {partner.pan_document ? (
+                            <button
+                              onClick={() => viewImage(partner.pan_document!, 'PAN Card')}
+                              className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                            >
+                              View Document
+                            </button>
+                          ) : (
+                            <p className="text-xs text-gray-500">Not uploaded</p>
+                          )}
+                        </div>
+
+                        {/* GST Certificate */}
+                        <div className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                          <div className="flex items-center gap-2 mb-2">
+                            <FileText className="w-4 h-4 text-gray-500" />
+                            <p className="text-sm font-semibold text-gray-900">GST Certificate</p>
+                          </div>
+                          {partner.gst_document ? (
+                            <button
+                              onClick={() => viewImage(partner.gst_document!, 'GST Certificate')}
+                              className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                            >
+                              View Document
+                            </button>
+                          ) : (
+                            <p className="text-xs text-gray-500">Not uploaded</p>
+                          )}
+                        </div>
+
+                        {/* FSSAI License */}
+                        <div className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                          <div className="flex items-center gap-2 mb-2">
+                            <FileText className="w-4 h-4 text-gray-500" />
+                            <p className="text-sm font-semibold text-gray-900">FSSAI License</p>
+                          </div>
+                          {partner.fssai_document ? (
+                            <button
+                              onClick={() => viewImage(partner.fssai_document!, 'FSSAI License')}
+                              className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                            >
+                              View Document
+                            </button>
+                          ) : (
+                            <p className="text-xs text-gray-500">Not uploaded</p>
+                          )}
+                        </div>
+
+                        {/* Shop License */}
+                        <div className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                          <div className="flex items-center gap-2 mb-2">
+                            <FileText className="w-4 h-4 text-gray-500" />
+                            <p className="text-sm font-semibold text-gray-900">Shop License</p>
+                          </div>
+                          {partner.shop_license_document ? (
+                            <button
+                              onClick={() => viewImage(partner.shop_license_document!, 'Shop License')}
+                              className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                            >
+                              View Document
+                            </button>
+                          ) : (
+                            <p className="text-xs text-gray-500">Not uploaded</p>
+                          )}
+                        </div>
+
+                        {/* Aadhaar Card */}
+                        <div className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                          <div className="flex items-center gap-2 mb-2">
+                            <FileText className="w-4 h-4 text-gray-500" />
+                            <p className="text-sm font-semibold text-gray-900">Aadhaar Card</p>
+                          </div>
+                          {partner.aadhaar_document ? (
+                            <button
+                              onClick={() => viewImage(partner.aadhaar_document!, 'Aadhaar Card')}
+                              className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                            >
+                              View Document
+                            </button>
+                          ) : (
+                            <p className="text-xs text-gray-500">Not uploaded</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Shop Image Management */}
+                    <div className="pt-6 border-t border-gray-200">
+                      <h4 className="text-lg font-semibold text-gray-900 mb-4">Shop Image (Customer App)</h4>
+                      <div className="flex items-center gap-4">
+                        {partner.image_url ? (
+                          <div className="relative w-32 h-32 border border-gray-200 rounded-lg overflow-hidden">
+                            <img 
+                              src={partner.image_url} 
+                              alt="Shop" 
+                              className="w-full h-full object-cover"
+                              onClick={() => viewImage(partner.image_url!, 'Shop Image')}
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-32 h-32 border border-gray-200 rounded-lg flex items-center justify-center bg-gray-50">
+                            <ImageIcon className="w-8 h-8 text-gray-300" />
+                          </div>
+                        )}
+                        <button
+                          onClick={() => setUploadModal({show: true, shopId: partner.id, type: 'shop'})}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2"
+                        >
+                          <Upload className="w-4 h-4" />
+                          Upload Shop Image
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">This image will be displayed in the customer app</p>
+                    </div>
+
                     {/* Action Buttons */}
                     <div className="flex gap-3 pt-6 border-t border-gray-200">
                       <button
@@ -400,6 +612,96 @@ const Partners = () => {
                     </div>
                   </div>
                 ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Viewer Modal */}
+      {imageViewer.show && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" onClick={() => setImageViewer({show: false, url: '', title: ''})}>
+          <div className="relative max-w-4xl w-full" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setImageViewer({show: false, url: '', title: ''})}
+              className="absolute top-4 right-4 bg-white rounded-full p-2 hover:bg-gray-100 transition-colors z-10"
+            >
+              <X className="w-6 h-6 text-gray-700" />
+            </button>
+            <div className="bg-white rounded-xl overflow-hidden">
+              <div className="bg-gradient-to-r from-red-600 to-red-800 text-white p-4">
+                <h3 className="text-xl font-bold">{imageViewer.title}</h3>
+              </div>
+              <div className="p-4 max-h-[70vh] overflow-auto">
+                <img 
+                  src={imageViewer.url} 
+                  alt={imageViewer.title}
+                  className="w-full h-auto rounded-lg"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect fill="%23f3f4f6" width="400" height="300"/><text x="50%" y="50%" fill="%236b7280" font-family="Arial" font-size="18" text-anchor="middle">Image not available</text></svg>';
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Image Modal */}
+      {uploadModal.show && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full">
+            <div className="bg-gradient-to-r from-red-600 to-red-800 text-white p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold">Upload Shop Image</h2>
+                <button
+                  onClick={() => setUploadModal({show: false, shopId: '', type: 'shop'})}
+                  className="text-white hover:text-red-100 transition-colors"
+                  disabled={uploading}
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Select Image
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      // Validate file size (max 5MB)
+                      if (file.size > 5 * 1024 * 1024) {
+                        alert('File size must be less than 5MB');
+                        return;
+                      }
+                      handleImageUpload(file, uploadModal.shopId, 'shop');
+                    }
+                  }}
+                  className="w-full border border-gray-300 rounded-lg p-2"
+                  disabled={uploading}
+                />
+                <p className="text-xs text-gray-500 mt-2">
+                  Maximum file size: 5MB. Supported formats: JPG, PNG, WEBP
+                </p>
+              </div>
+
+              {uploading && (
+                <div className="flex items-center justify-center gap-2 text-gray-600">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Uploading...</span>
+                </div>
+              )}
+
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800">
+                  <strong>Note:</strong> This image will be displayed to customers in the mobile app when they browse shops.
+                </p>
+              </div>
             </div>
           </div>
         </div>
