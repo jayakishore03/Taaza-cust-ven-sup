@@ -1047,10 +1047,9 @@ export const linkShopToVendor = async (
 /**
  * Sign in vendor using Supabase Auth
  * This authenticates the vendor and fetches their shop details from the shops table
- * Supports sign-in with either email or mobile number
  */
 export const signInVendor = async (
-  mobileNumberOrEmail: string,
+  email: string,
   password: string
 ): Promise<{ 
   success: boolean; 
@@ -1059,40 +1058,11 @@ export const signInVendor = async (
   error?: string 
 }> => {
   try {
-    console.log('[signInVendor] Signing in vendor with:', mobileNumberOrEmail);
-    
-    let emailToUse = mobileNumberOrEmail;
-    
-    // Check if input is a mobile number (10 digits) instead of email
-    const isMobileNumber = /^\d{10}$/.test(mobileNumberOrEmail.trim());
-    
-    if (isMobileNumber) {
-      console.log('[signInVendor] Input is mobile number, looking up email...');
-      
-      // Look up email from shops table using mobile number
-      const { data: shopData, error: shopError } = await supabase
-        .from('shops')
-        .select('email')
-        .eq('mobile_number', mobileNumberOrEmail.trim())
-        .single();
-      
-      if (shopError || !shopData || !shopData.email) {
-        console.error('[signInVendor] Mobile number not found:', shopError);
-        return {
-          success: false,
-          error: 'Mobile number not registered. Please check your number or sign up.',
-        };
-      }
-      
-      emailToUse = shopData.email;
-      console.log('[signInVendor] Found email for mobile number');
-    }
-    
-    console.log('[signInVendor] Attempting sign-in with email');
+    console.log('[signInVendor] Signing in vendor with:', email);
     
     // Step 1: Sign in with Supabase Auth
     let { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email: emailToUse,
+      email: email.trim(),
       password: password,
     });
 
@@ -1131,7 +1101,7 @@ export const signInVendor = async (
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ email: emailToUse }),
+            body: JSON.stringify({ email: email.trim() }),
           });
 
           console.log('[signInVendor] Confirmation response status:', confirmResponse.status);
@@ -1221,7 +1191,7 @@ export const signInVendor = async (
             
             // Try signing in anyway - email might already be confirmed
             const { data: retryAuthData, error: retryAuthError } = await supabase.auth.signInWithPassword({
-              email: emailToUse,
+              email: email.trim(),
               password: password,
             });
 

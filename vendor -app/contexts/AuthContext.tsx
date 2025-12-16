@@ -103,13 +103,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signIn = async (mobileNumberOrEmail: string, password: string) => {
+  const signIn = async (email: string, password: string) => {
     try {
       setIsLoading(true);
 
       // Use Supabase Auth for vendor sign-in (vendors are registered in Supabase Auth)
-      // The signInVendor function will handle both mobile number and email
-      const result = await signInVendor(mobileNumberOrEmail, password);
+      const result = await signInVendor(email, password);
       
       if (result.success && result.user) {
         // Set user data

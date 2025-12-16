@@ -15,12 +15,12 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import { User, Lock, Eye, EyeOff, Phone } from 'lucide-react-native';
+import { User, Lock, Eye, EyeOff } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginScreen() {
   const { signIn } = useAuth();
-  const [mobileNumber, setMobileNumber] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -51,15 +51,15 @@ export default function LoginScreen() {
   }, []);
 
   const handleLogin = async () => {
-    if (!mobileNumber || !password) {
+    if (!email || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
     
-    // Validate mobile number format (10 digits)
-    const cleanMobile = mobileNumber.trim().replace(/[^\d]/g, '');
-    if (cleanMobile.length !== 10) {
-      Alert.alert('Error', 'Please enter a valid 10-digit mobile number');
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
     
@@ -67,7 +67,7 @@ export default function LoginScreen() {
     let loginSuccess = false;
     
     try {
-      const result = await signIn(cleanMobile, password);
+      const result = await signIn(email.trim(), password);
       
       if (result.success) {
         loginSuccess = true;
@@ -99,7 +99,7 @@ export default function LoginScreen() {
         })();
       } else {
         // Show error message with better formatting
-        const errorMsg = result.error || 'Invalid mobile number or password';
+        const errorMsg = result.error || 'Invalid email or password';
         Alert.alert('Login Failed', errorMsg);
         setLoading(false);
       }
@@ -153,15 +153,15 @@ export default function LoginScreen() {
 
               <View style={styles.inputContainer}>
                 <View style={styles.inputWrapper}>
-                  <Phone size={20} color="#000000" style={styles.inputIcon} />
+                  <User size={20} color="#000000" style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
-                    placeholder="Mobile Number"
-                    value={mobileNumber}
-                    onChangeText={setMobileNumber}
-                    keyboardType="phone-pad"
+                    placeholder="Email Address"
+                    value={email}
+                    onChangeText={setEmail}
+                    keyboardType="email-address"
                     autoCapitalize="none"
-                    maxLength={10}
+                    autoCorrect={false}
                     placeholderTextColor="#6B7280"
                   />
                 </View>
