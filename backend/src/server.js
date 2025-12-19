@@ -29,6 +29,7 @@ import migrateRoutes from './routes/migrate.js';
 import migrateDirectRoutes from './routes/migrate-direct.js';
 import migrateReferenceRoutes from './routes/migrate-reference-data.js';
 import vendorRoutes from './routes/vendor.js';
+import emailRoutes from './routes/email.js';
 
 // Load environment variables
 dotenv.config();
@@ -103,6 +104,7 @@ app.use('/api/migrate', migrateRoutes);
 app.use('/api/migrate-direct', migrateDirectRoutes);
 app.use('/api/migrate-reference', migrateReferenceRoutes);
 app.use('/api/vendor', vendorRoutes);
+app.use('/api/email', emailRoutes);
 
 // 404 handler
 app.use(notFound);

@@ -4,7 +4,7 @@
  */
 
 import { supabase } from '../lib/supabase';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
 
 export interface UploadResult {
@@ -48,7 +48,7 @@ export async function uploadImageToStorage(
 
     // Read file as base64
     const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
+      encoding: 'base64',
     });
 
     // Convert base64 to ArrayBuffer

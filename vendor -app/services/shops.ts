@@ -573,34 +573,54 @@ export const createShopInSupabase = async (
         return String(photo);
       });
       
+      console.log('[createShopInSupabase] Attempting to upload photos:', photoUris);
       const uploadResult = await uploadShopPhotos(photoUris, shopId);
       
       if (uploadResult.success && uploadResult.urls.length > 0) {
         storePhotoUrls = uploadResult.urls;
         imageUrl = storePhotoUrls[0]; // Use first photo as main image
-        console.log('[createShopInSupabase] Successfully uploaded', storePhotoUrls.length, 'photos');
+        console.log('[createShopInSupabase] ✅ Successfully uploaded', storePhotoUrls.length, 'photos');
+        console.log('[createShopInSupabase] Photo URLs:', storePhotoUrls);
       } else {
-        console.warn('[createShopInSupabase] Photo upload failed:', uploadResult.errors);
-        // Continue with registration even if photos failed to upload
-        // Use local URIs as fallback (not ideal, but allows registration to complete)
-        storePhotoUrls = photoUris;
-        if (photoUris.length > 0) {
-          imageUrl = photoUris[0];
-        }
+        console.error('[createShopInSupabase] ❌ Photo upload FAILED:', uploadResult.errors);
+        console.error('[createShopInSupabase] This will cause images to NOT display in admin dashboard!');
+        // DO NOT save local URIs - they won't work in web browser
+        // Keep placeholder image instead
+        storePhotoUrls = [];
+        imageUrl = 'https://via.placeholder.com/400x300?text=Upload+Failed';
       }
     }
 
     // ===== UPLOAD DOCUMENTS TO SUPABASE STORAGE =====
     console.log('[createShopInSupabase] Uploading documents...');
+    console.log('[createShopInSupabase] Documents received:', registrationData.documents);
     const { uploadDocument } = require('./imageUpload');
     
     // Extract document URIs from registration data
-    // Documents are stored as { uri, name, type } objects
-    let panDocUrl = registrationData.documents?.pan?.uri || registrationData.panDocument || null;
-    let gstDocUrl = registrationData.documents?.gst?.uri || registrationData.gstDocument || null;
-    let fssaiDocUrl = registrationData.documents?.fssai?.uri || registrationData.fssaiDocument || null;
-    let shopLicenseDocUrl = registrationData.documents?.shopLicense?.uri || registrationData.shopLicenseDocument || null;
-    let aadhaarDocUrl = registrationData.documents?.aadhaar?.uri || registrationData.aadhaarDocument || null;
+    // Documents can be either strings (URIs) or objects with .uri property
+    let panDocUrl = (typeof registrationData.documents?.pan === 'string' 
+      ? registrationData.documents.pan 
+      : registrationData.documents?.pan?.uri) || registrationData.panDocument || null;
+    let gstDocUrl = (typeof registrationData.documents?.gst === 'string' 
+      ? registrationData.documents.gst 
+      : registrationData.documents?.gst?.uri) || registrationData.gstDocument || null;
+    let fssaiDocUrl = (typeof registrationData.documents?.fssai === 'string' 
+      ? registrationData.documents.fssai 
+      : registrationData.documents?.fssai?.uri) || registrationData.fssaiDocument || null;
+    let shopLicenseDocUrl = (typeof registrationData.documents?.shopLicense === 'string' 
+      ? registrationData.documents.shopLicense 
+      : registrationData.documents?.shopLicense?.uri) || registrationData.shopLicenseDocument || null;
+    let aadhaarDocUrl = (typeof registrationData.documents?.aadhaar === 'string' 
+      ? registrationData.documents.aadhaar 
+      : registrationData.documents?.aadhaar?.uri) || registrationData.aadhaarDocument || null;
+    
+    console.log('[createShopInSupabase] Extracted document URLs:', {
+      pan: panDocUrl,
+      gst: gstDocUrl,
+      fssai: fssaiDocUrl,
+      shopLicense: shopLicenseDocUrl,
+      aadhaar: aadhaarDocUrl
+    });
     
     // Upload PAN document if present and is local URI
     if (panDocUrl && !panDocUrl.startsWith('https://')) {
@@ -663,6 +683,23 @@ export const createShopInSupabase = async (
     }
     
     console.log('[createShopInSupabase] Document upload complete!');
+    
+    // ===== UPLOAD SIGNATURE TO SUPABASE STORAGE =====
+    console.log('[createShopInSupabase] Uploading signature...');
+    let signatureUrl = registrationData.signature || null;
+    
+    if (signatureUrl && !signatureUrl.startsWith('https://')) {
+      console.log('[createShopInSupabase] Uploading signature image...');
+      const result = await uploadDocument(signatureUrl, shopId, 'signature');
+      if (result.success && result.url) {
+        signatureUrl = result.url;
+        console.log('[createShopInSupabase] Signature uploaded:', signatureUrl);
+      } else {
+        console.warn('[createShopInSupabase] Signature upload failed:', result.error);
+      }
+    }
+    
+    console.log('[createShopInSupabase] All uploads complete!');
 
     // Prepare shop data for Supabase - ALL vendor registration data is saved to shops table
     // This ensures customer app can read complete shop data directly from shops table
@@ -732,10 +769,10 @@ export const createShopInSupabase = async (
       bank_branch: registrationData.bankDetails?.bankBranch || null,
       account_type: registrationData.bankDetails?.accountType || null,
       
-      // Step 6: Contract & Signature
+      // Step 6: Contract & Signature (uploaded to Supabase Storage)
       contract_accepted: registrationData.contractAccepted || false,
       profit_share: registrationData.profitShare || 20,
-      signature: registrationData.signature || null,
+      signature: signatureUrl,
       
       // User Account Link (references auth.users)
       user_id: userId,

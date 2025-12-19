@@ -431,21 +431,11 @@ export default function HomeScreen() {
                     resizeMode="cover"
                   />
                   <View style={styles.shopInfo}>
-                    <View style={styles.shopHeader}>
-                      <Text style={styles.shopName}>{shop.name}</Text>
-                    </View>
-                    {shop.vendor?.ownerName && (
-                      <Text style={styles.shopOwner}>Owner: {shop.vendor.ownerName}</Text>
-                    )}
-                    <Text style={styles.shopAddress}>{shop.address}</Text>
-                    {shop.vendor?.mobileNumber && (
-                      <Text style={styles.shopContact}>📞 {shop.vendor.mobileNumber}</Text>
-                    )}
+                    <Text style={styles.shopName}>{shop.name}</Text>
                     {shop.vendor?.shopType && (
-                      <Text style={styles.shopType}>🏪 {shop.vendor.shopType}</Text>
+                      <Text style={styles.shopType}>🏪 {shop.vendor.shopType.charAt(0).toUpperCase() + shop.vendor.shopType.slice(1)}</Text>
                     )}
-                    <Text style={styles.shopDistance}>{shop.distance} • Open now</Text>
-                    <Text style={styles.shopAction}>View items</Text>
+                    <Text style={styles.shopDistance}>📍 {shop.distance}</Text>
                   </View>
                 </TouchableOpacity>
               ))}
@@ -897,15 +887,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 3,
+    marginBottom: 12,
+    height: 110,
   },
   shopImage: {
-    width: 100,
-    height: '100%',
+    width: 110,
+    height: 110,
   },
   shopInfo: {
     flex: 1,
-    padding: 14,
-    justifyContent: 'space-between',
+    padding: 16,
+    justifyContent: 'center',
   },
   shopHeader: {
     flexDirection: 'row',
@@ -913,10 +905,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   shopName: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     color: '#1F2937',
-    flex: 1,
+    marginBottom: 6,
   },
   shopOwner: {
     fontSize: 12,
@@ -935,15 +927,14 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   shopType: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    marginTop: 2,
-    textTransform: 'capitalize',
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 6,
+    fontWeight: '500',
   },
   shopDistance: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#DC2626',
-    marginTop: 4,
     fontWeight: '600',
   },
   shopAction: {

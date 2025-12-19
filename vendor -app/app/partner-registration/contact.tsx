@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -34,93 +34,6 @@ export default function Step2ContactDetails() {
     isWhatsAppSame: true,
     whatsappNumber: '',
   });
-
-  const [otpRequested, setOtpRequested] = useState<boolean>(false);
-  const [otp, setOtp] = useState<string>('');
-  const [otpVerified, setOtpVerified] = useState<boolean>(false);
-  const [sessionId, setSessionId] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false);
-  const [resendCooldown, setResendCooldown] = useState<number>(0);
-  const cooldownIntervalRef = useRef<number | null>(null);
-
-  const apiKey = '454c14ae-a073-11f0-b922-0200cd936042';
-
-  // Cooldown timer effect
-  useEffect(() => {
-    if (resendCooldown > 0) {
-      cooldownIntervalRef.current = setInterval(() => {
-        setResendCooldown((prev) => {
-          if (prev <= 1) {
-            if (cooldownIntervalRef.current) {
-              clearInterval(cooldownIntervalRef.current);
-            }
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000) as unknown as number;
-    }
-
-    return () => {
-      if (cooldownIntervalRef.current) {
-        clearInterval(cooldownIntervalRef.current);
-      }
-    };
-  }, [resendCooldown]);
-
-  const sendOtp = async (mobileNumber: string, isResend: boolean = false) => {
-    if (!mobileNumber || mobileNumber.length < 10) {
-      Alert.alert('Invalid Number', 'Please enter a valid mobile number (at least 10 digits).');
-      return;
-    }
-
-    setLoading(true);
-    const url = `https://2factor.in/API/V1/${apiKey}/SMS/${mobileNumber}/AUTOGEN`;
-    try {
-      const response = await fetch(url);
-      const data = await response.json();
-      if (data.Status === 'Success') {
-        setSessionId(data.Details); // Save session ID
-        setOtpRequested(true);
-        setOtp(''); // Clear previous OTP
-        setOtpVerified(false); // Reset verification status
-        setResendCooldown(30); // Set 30 second cooldown
-        Alert.alert('Success', `OTP ${isResend ? 'resent' : 'sent'} to +${mobileNumber}`);
-      } else {
-        Alert.alert('Failed', 'Failed to send OTP. Please try again.');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Error sending OTP. Check your internet connection.');
-    }
-    setLoading(false);
-  };
-
-  const handleResendOtp = () => {
-    if (resendCooldown > 0) {
-      Alert.alert('Please Wait', `Please wait ${resendCooldown} seconds before resending OTP.`);
-      return;
-    }
-    sendOtp(form.mobileNumber, true);
-  };
-
-  const verifyOtp = async (mobileNumber: string, sessionId: string, otp: string) => {
-    setLoading(true);
-    const url = `https://2factor.in/API/V1/${apiKey}/SMS/VERIFY/${sessionId}/${otp}`;
-    try {
-      const response = await fetch(url);
-      const data = await response.json();
-      if (data.Status === 'Success') {
-        alert('OTP Verified!');
-        setOtpVerified(true);
-      } else {
-        alert('Invalid OTP. Please try again.');
-        setOtpVerified(false);
-      }
-    } catch (error) {
-      alert('Error verifying OTP.');
-    }
-    setLoading(false);
-  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -195,63 +108,9 @@ export default function Step2ContactDetails() {
             placeholderTextColor="#999"
             keyboardType="phone-pad"
             value={form.mobileNumber}
-            onChangeText={(text) => {
-              setForm((f) => ({ ...f, mobileNumber: text }));
-              setOtpRequested(false);
-              setOtp('');
-              setOtpVerified(false);
-            }}
-            editable={!otpVerified}
+            onChangeText={(text) => setForm((f) => ({ ...f, mobileNumber: text }))}
           />
         </View>
-
-        {!otpRequested && (
-          <TouchableOpacity
-            style={[styles.sendOtpButton, loading && styles.disabledButton]}
-            onPress={() => sendOtp(form.mobileNumber)}
-            disabled={loading || !form.mobileNumber || form.mobileNumber.length < 10}
-          >
-            <Text style={styles.sendOtpButtonText}>Send OTP</Text>
-          </TouchableOpacity>
-        )}
-
-        {otpRequested && !otpVerified && (
-          <>
-            <View style={styles.inputWithIcon}>
-              <MaterialIcons name="lock" size={24} color="#555" style={styles.icon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter OTP"
-                placeholderTextColor="#999"
-                keyboardType="number-pad"
-                maxLength={6}
-                value={otp}
-                onChangeText={(text) => setOtp(text)}
-              />
-            </View>
-            <TouchableOpacity
-              style={[styles.verifyOtpButton, loading && styles.disabledButton]}
-              onPress={() => verifyOtp(form.mobileNumber, sessionId, otp)}
-              disabled={loading || otp.length !== 6}
-            >
-              <Text style={styles.verifyOtpButtonText}>Verify OTP</Text>
-            </TouchableOpacity>
-            
-            {/* Resend OTP Button */}
-            <View style={styles.resendContainer}>
-              <Text style={styles.resendText}>Didn't receive OTP? </Text>
-              <TouchableOpacity
-                onPress={handleResendOtp}
-                disabled={loading || resendCooldown > 0}
-                style={styles.resendButton}
-              >
-                <Text style={[styles.resendButtonText, (loading || resendCooldown > 0) && styles.resendButtonTextDisabled]}>
-                  {resendCooldown > 0 ? `Resend OTP (${resendCooldown}s)` : 'Resend OTP'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        )}
 
         {/* WhatsApp Information */}
         <View style={styles.whatsAppContainer}>
@@ -287,8 +146,9 @@ export default function Step2ContactDetails() {
                 return;
               }
               
-              if (!otpVerified) {
-                Alert.alert('OTP Required', 'Please verify your mobile number with OTP before proceeding.');
+              // Validate mobile number length
+              if (form.mobileNumber.length < 10) {
+                Alert.alert('Invalid Mobile Number', 'Please enter a valid mobile number (at least 10 digits).');
                 return;
               }
               
@@ -298,7 +158,6 @@ export default function Step2ContactDetails() {
                 mobileNumber: form.mobileNumber,
                 whatsappNumber: form.whatsappNumber || form.mobileNumber,
                 isWhatsAppSame: form.isWhatsAppSame,
-                otpVerified: otpVerified,
               });
               
               // Navigate to working-days route on next step
@@ -424,42 +283,6 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontWeight: '500',
   },
-  sendOtpButton: {
-    backgroundColor: '#3B82F6',
-    paddingVertical: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    alignItems: 'center',
-    shadowColor: '#3B82F6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  sendOtpButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 16,
-    letterSpacing: 0.5,
-  },
-  verifyOtpButton: {
-    backgroundColor: '#10B981',
-    paddingVertical: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    alignItems: 'center',
-    shadowColor: '#10B981',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  verifyOtpButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 16,
-    letterSpacing: 0.5,
-  },
   whatsAppContainer: {
     marginBottom: 16,
     backgroundColor: '#FFFFFF',
@@ -564,34 +387,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 16,
     letterSpacing: 0.5,
-  },
-  disabledButton: {
-    opacity: 0.6,
-  },
-  resendContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-    marginBottom: 16,
-  },
-  resendText: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  resendButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-  },
-  resendButtonText: {
-    fontSize: 14,
-    color: '#3B82F6',
-    fontWeight: '700',
-    textDecorationLine: 'underline',
-  },
-  resendButtonTextDisabled: {
-    color: '#9CA3AF',
-    textDecorationLine: 'none',
   },
 });
