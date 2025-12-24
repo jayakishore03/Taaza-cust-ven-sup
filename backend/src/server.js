@@ -7,7 +7,6 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
@@ -30,9 +29,7 @@ import migrateDirectRoutes from './routes/migrate-direct.js';
 import migrateReferenceRoutes from './routes/migrate-reference-data.js';
 import vendorRoutes from './routes/vendor.js';
 import emailRoutes from './routes/email.js';
-
-// Load environment variables
-dotenv.config();
+import bankRoutes from './routes/bank.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -51,8 +48,13 @@ app.use(morgan('dev')); // Logging
 app.use(express.json()); // Parse JSON bodies
 app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
 
-// Serve static images from backend/images folder
-app.use('/images', express.static(join(__dirname, '../images')));
+// Serve static images from backend/images folder (if exists)
+try {
+  const imagesPath = join(__dirname, '../images');
+  app.use('/images', express.static(imagesPath));
+} catch (error) {
+  console.warn('⚠️ Images directory not found, skipping static file serving');
+}
 
 // Handle favicon requests (browsers automatically request this)
 app.get('/favicon.ico', (req, res) => {
@@ -84,6 +86,7 @@ app.get('/api', (req, res) => {
       addons: '/api/addons',
       payments: '/api/payments',
       vendor: '/api/vendor',
+      bank: '/api/bank',
       migrate: '/api/migrate (POST /api/migrate/all to load data)',
     },
     timestamp: new Date().toISOString(),
@@ -105,6 +108,7 @@ app.use('/api/migrate-direct', migrateDirectRoutes);
 app.use('/api/migrate-reference', migrateReferenceRoutes);
 app.use('/api/vendor', vendorRoutes);
 app.use('/api/email', emailRoutes);
+app.use('/api/bank', bankRoutes);
 
 // 404 handler
 app.use(notFound);
@@ -112,14 +116,17 @@ app.use(notFound);
 // Error handler
 app.use(errorHandler);
 
-// Start server - listen on all interfaces (0.0.0.0) to allow mobile device connections
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Taza Backend API running on port ${PORT}`);
-  console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`📚 API base: http://localhost:${PORT}/api`);
+// Start server - only for local development
+// Vercel handles server startup automatically for serverless functions
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Taza Backend API running on port ${PORT}`);
+    console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+    console.log(`📚 API base: http://localhost:${PORT}/api`);
     console.log(`📱 Mobile access: http://192.168.0.8:${PORT}/api (or your computer's IP)`);
-});
+  });
+}
 
 export default app;
 
