@@ -61,6 +61,25 @@ app.get('/favicon.ico', (req, res) => {
   res.status(204).end(); // No Content - browser will use default
 });
 
+// Root path - redirect to API info
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Taza API - Welcome!',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      api: '/api',
+      products: '/api/products',
+      shops: '/api/shops',
+      orders: '/api/orders',
+      auth: '/api/auth',
+    },
+    documentation: 'Visit /api for full API documentation',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({
