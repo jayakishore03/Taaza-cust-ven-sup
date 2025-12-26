@@ -1,31 +1,17 @@
 {
   "version": 2,
-  "builds": [
+  "buildCommand": "echo 'No build needed'",
+  "outputDirectory": ".",
+  "rewrites": [
     {
-      "src": "src/server.js",
-      "use": "@vercel/node"
+      "source": "/(.*)",
+      "destination": "/api/index"
     }
   ],
-  "routes": [
-    {
-      "src": "/health",
-      "dest": "src/server.js"
-    },
-    {
-      "src": "/api/(.*)",
-      "dest": "src/server.js"
-    },
-    {
-      "src": "/images/(.*)",
-      "dest": "src/server.js"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "src/server.js"
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "src/**"
     }
-  ],
-  "env": {
-    "NODE_ENV": "production"
   }
 }
 
