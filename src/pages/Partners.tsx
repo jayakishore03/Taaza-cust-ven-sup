@@ -20,6 +20,11 @@ interface Shop {
   fssai_document?: string;
   shop_license_document?: string;
   aadhaar_document?: string;
+  signature?: string;
+  // Approval fields
+  is_approved?: boolean;
+  is_verified?: boolean;
+  user_id?: string;
 }
 
 const Partners = () => {
@@ -31,6 +36,7 @@ const Partners = () => {
   const [imageViewer, setImageViewer] = useState<{show: boolean; url: string; title: string}>({show: false, url: '', title: ''});
   const [uploadModal, setUploadModal] = useState<{show: boolean; shopId: string; type: 'shop' | 'document'}>({show: false, shopId: '', type: 'shop'});
   const [uploading, setUploading] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   // Fetch shops from Supabase
   useEffect(() => {
@@ -50,6 +56,16 @@ const Partners = () => {
       if (fetchError) {
         throw fetchError;
       }
+
+      // Debug: Log shop image data
+      console.log('=== FETCHED SHOPS DEBUG ===');
+      data?.forEach((shop, index) => {
+        console.log(`Shop ${index + 1}: ${shop.name}`);
+        console.log('  - image_url:', shop.image_url);
+        console.log('  - shop_image_url:', shop.shop_image_url);
+        console.log('  - store_photos:', shop.store_photos);
+        console.log('---');
+      });
 
       setPartners(data || []);
     } catch (err: any) {
@@ -249,14 +265,23 @@ const Partners = () => {
               >
                 {/* Shop Image */}
                 <div className="relative h-48 bg-gradient-to-br from-red-600 to-red-800">
-                  {partner.shop_image_url ? (
+                  {(partner.image_url || partner.shop_image_url || (partner.store_photos && partner.store_photos.length > 0)) ? (
                     <img
-                      src={partner.shop_image_url}
+                      src={partner.image_url || partner.shop_image_url || (partner.store_photos && partner.store_photos[0]) || ''}
                       alt={partner.name}
                       className="w-full h-full object-cover"
                       onError={(e) => {
                         const target = e.target as HTMLImageElement;
+                        console.error(`❌ Image failed to load for ${partner.name}:`, {
+                          image_url: partner.image_url,
+                          shop_image_url: partner.shop_image_url,
+                          store_photos: partner.store_photos,
+                          attempted_src: target.src
+                        });
                         target.style.display = 'none';
+                      }}
+                      onLoad={() => {
+                        console.log(`✅ Image loaded successfully for ${partner.name}`);
                       }}
                     />
                   ) : (
@@ -321,6 +346,18 @@ const Partners = () => {
                     </div>
                   </div>
 
+                  {/* Approval Status Badge */}
+                  {partner.is_approved === false && (
+                    <div className="mb-4 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <p className="text-xs text-yellow-800 font-medium">⏳ Pending Approval</p>
+                    </div>
+                  )}
+                  {partner.is_approved === true && (
+                    <div className="mb-4 p-2 bg-green-50 border border-green-200 rounded-lg">
+                      <p className="text-xs text-green-800 font-medium">✅ Approved</p>
+                    </div>
+                  )}
+
                   {/* Action Buttons */}
                   <div className="flex gap-2">
                     <button
@@ -367,9 +404,9 @@ const Partners = () => {
                   <div key={partner.id} className="space-y-6">
                     {/* Shop Image */}
                     <div className="relative h-64 bg-gradient-to-br from-red-600 to-red-800 rounded-lg overflow-hidden">
-                      {partner.shop_image_url ? (
+                      {(partner.image_url || partner.shop_image_url || (partner.store_photos && partner.store_photos.length > 0)) ? (
                         <img
-                          src={partner.shop_image_url}
+                          src={partner.image_url || partner.shop_image_url || (partner.store_photos && partner.store_photos[0]) || ''}
                           alt={partner.name}
                           className="w-full h-full object-cover"
                           onError={(e) => {
@@ -555,6 +592,24 @@ const Partners = () => {
                             <p className="text-xs text-gray-500">Not uploaded</p>
                           )}
                         </div>
+
+                        {/* Contract Signature */}
+                        <div className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                          <div className="flex items-center gap-2 mb-2">
+                            <FileText className="w-4 h-4 text-gray-500" />
+                            <p className="text-sm font-semibold text-gray-900">Contract Signature</p>
+                          </div>
+                          {partner.signature ? (
+                            <button
+                              onClick={() => viewImage(partner.signature!, 'Contract Signature')}
+                              className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                            >
+                              View Signature
+                            </button>
+                          ) : (
+                            <p className="text-xs text-gray-500">Not signed</p>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -563,7 +618,7 @@ const Partners = () => {
                       <h4 className="text-lg font-semibold text-gray-900 mb-4">Shop Image (Customer App)</h4>
                       <div className="flex items-center gap-4">
                         {partner.image_url ? (
-                          <div className="relative w-32 h-32 border border-gray-200 rounded-lg overflow-hidden">
+                          <div className="relative w-32 h-32 border border-gray-200 rounded-lg overflow-hidden cursor-pointer">
                             <img 
                               src={partner.image_url} 
                               alt="Shop" 
@@ -585,6 +640,200 @@ const Partners = () => {
                         </button>
                       </div>
                       <p className="text-xs text-gray-500 mt-2">This image will be displayed in the customer app</p>
+                    </div>
+
+                    {/* Approval Section */}
+                    <div className="pt-6 border-t border-gray-200">
+                      <h4 className="text-lg font-semibold text-gray-900 mb-4">Shop Approval Status</h4>
+                      <div className="space-y-4">
+                        {/* Status Badges */}
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-700">Approved:</span>
+                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                              partner.is_approved 
+                                ? 'bg-green-100 text-green-700' 
+                                : 'bg-yellow-100 text-yellow-700'
+                            }`}>
+                              {partner.is_approved ? '✅ Yes' : '⏳ Pending'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-700">Verified:</span>
+                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                              partner.is_verified 
+                                ? 'bg-green-100 text-green-700' 
+                                : 'bg-gray-100 text-gray-700'
+                            }`}>
+                              {partner.is_verified ? '✅ Yes' : '❌ No'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Approval Actions */}
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <p className="text-sm text-blue-800 mb-3">
+                            <strong>Note:</strong> Only approved shops will be visible to customers in the mobile app.
+                          </p>
+                          <div className="flex gap-3 flex-wrap">
+                            {!partner.is_approved ? (
+                              <button
+                                onClick={async () => {
+                                  if (confirm(`Approve shop "${partner.name}"? This will make it visible to customers.`)) {
+                                    try {
+                                      const { error } = await supabase
+                                        .from('shops')
+                                        .update({ 
+                                          is_approved: true, 
+                                          is_verified: true 
+                                        })
+                                        .eq('id', partner.id);
+                                      
+                                      if (error) throw error;
+                                      
+                                      alert('✅ Shop approved successfully!');
+                                      await fetchShops();
+                                    } catch (err: any) {
+                                      alert(`Error approving shop: ${err.message}`);
+                                    }
+                                  }
+                                }}
+                                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center justify-center gap-2"
+                              >
+                                ✅ Approve Shop
+                              </button>
+                            ) : (
+                              <button
+                                onClick={async () => {
+                                  if (confirm(`Revoke approval for "${partner.name}"? This will hide it from customers.`)) {
+                                    try {
+                                      const { error } = await supabase
+                                        .from('shops')
+                                        .update({ 
+                                          is_approved: false, 
+                                          is_verified: false 
+                                        })
+                                        .eq('id', partner.id);
+                                      
+                                      if (error) throw error;
+                                      
+                                      alert('Shop approval revoked');
+                                      await fetchShops();
+                                    } catch (err: any) {
+                                      alert(`Error: ${err.message}`);
+                                    }
+                                  }
+                                }}
+                                className="flex-1 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors font-medium flex items-center justify-center gap-2"
+                              >
+                                ⏸️ Revoke Approval
+                              </button>
+                            )}
+
+                            {/* Send Welcome Email Button */}
+                            {partner.is_approved && (
+                              <button
+                                onClick={async () => {
+                                  if (!partner.email) {
+                                    alert('❌ No email address found for this shop');
+                                    return;
+                                  }
+                                  
+                                  if (confirm(`Send welcome email to ${partner.email}?`)) {
+                                    try {
+                                      setSendingEmail(true);
+                                      
+                                      // Call backend email API
+                                      const response = await fetch(`https://taaza-customer.vercel.app/api/email/welcome/${partner.id}`, {
+                                        method: 'POST',
+                                        headers: {
+                                          'Content-Type': 'application/json'
+                                        }
+                                      });
+                                      
+                                      // Check if response is ok before parsing JSON
+                                      if (!response.ok) {
+                                        // Try to get error message from response
+                                        let errorMessage = `Failed to send email (Status: ${response.status})`;
+                                        try {
+                                          const errorData = await response.json();
+                                          errorMessage = errorData.error?.message || errorData.message || errorMessage;
+                                        } catch (e) {
+                                          // If response is not JSON, use status text
+                                          errorMessage = response.statusText || errorMessage;
+                                        }
+                                        throw new Error(errorMessage);
+                                      }
+                                      
+                                      const result = await response.json();
+                                      
+                                      if (result.success) {
+                                        alert(`✅ Welcome email sent successfully to ${partner.email}!`);
+                                      } else {
+                                        throw new Error(result.error?.message || result.error || 'Failed to send email');
+                                      }
+                                    } catch (err: any) {
+                                      // Handle different types of errors
+                                      let errorMessage = 'Failed to send email';
+                                      
+                                      if (err.message) {
+                                        errorMessage = err.message;
+                                      } else if (err instanceof TypeError && err.message.includes('fetch')) {
+                                        errorMessage = 'Network error: Could not connect to server. Please check your internet connection or try again later.';
+                                      } else {
+                                        errorMessage = err.toString();
+                                      }
+                                      
+                                      alert(`❌ Error sending email: ${errorMessage}`);
+                                      console.error('Email sending error:', err);
+                                    } finally {
+                                      setSendingEmail(false);
+                                    }
+                                  }
+                                }}
+                                disabled={sendingEmail || !partner.email}
+                                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                              >
+                                {sendingEmail ? (
+                                  <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Sending...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Mail className="w-4 h-4" />
+                                    Send Welcome Email
+                                  </>
+                                )}
+                              </button>
+                            )}
+                            
+                            <button
+                              onClick={async () => {
+                                if (confirm(`Reject and delete shop "${partner.name}"? This action cannot be undone.`)) {
+                                  try {
+                                    const { error } = await supabase
+                                      .from('shops')
+                                      .delete()
+                                      .eq('id', partner.id);
+                                    
+                                    if (error) throw error;
+                                    
+                                    alert('❌ Shop rejected and deleted');
+                                    setSelectedPartner(null);
+                                    await fetchShops();
+                                  } catch (err: any) {
+                                    alert(`Error deleting shop: ${err.message}`);
+                                  }
+                                }
+                              }}
+                              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center justify-center gap-2"
+                            >
+                              🗑️ Delete Shop
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Action Buttons */}

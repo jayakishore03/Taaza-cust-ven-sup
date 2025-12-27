@@ -190,3 +190,4 @@ The build output will be in the `dist/` folder.
 
 Made with ❤️ for Taaza Meat Delivery Platform
 
+
