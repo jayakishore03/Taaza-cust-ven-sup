@@ -57,7 +57,16 @@ try {
 }
 
 // Handle favicon requests (browsers automatically request this)
+// These must be defined early, before any other routes
 app.get('/favicon.ico', (req, res) => {
+  res.status(204).end(); // No Content - browser will use default
+});
+
+app.get('/favicon.png', (req, res) => {
+  res.status(204).end(); // No Content - browser will use default
+});
+
+app.get('/favicon', (req, res) => {
   res.status(204).end(); // No Content - browser will use default
 });
 
@@ -87,6 +96,57 @@ app.get('/health', (req, res) => {
     message: 'Taza API is running',
     timestamp: new Date().toISOString(),
   });
+});
+
+// Supabase configuration check (diagnostic endpoint)
+app.get('/health/supabase', async (req, res) => {
+  try {
+    const { supabaseAdmin } = await import('./config/database.js');
+    
+    // Check if Supabase is configured
+    const hasUrl = !!process.env.SUPABASE_URL;
+    const hasAnonKey = !!process.env.SUPABASE_ANON_KEY;
+    const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    // Try a simple query to verify connection
+    let connectionTest = { success: false, error: null };
+    if (supabaseAdmin && supabaseAdmin.from) {
+      try {
+        const { error } = await supabaseAdmin
+          .from('addresses')
+          .select('id')
+          .limit(1);
+        
+        if (error) {
+          connectionTest = { success: false, error: error.message };
+        } else {
+          connectionTest = { success: true, error: null };
+        }
+      } catch (err) {
+        connectionTest = { success: false, error: err.message };
+      }
+    }
+    
+    res.json({
+      success: true,
+      supabase: {
+        configured: hasUrl && hasAnonKey && hasServiceKey,
+        hasUrl,
+        hasAnonKey,
+        hasServiceKey,
+        connectionTest,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        message: 'Failed to check Supabase configuration',
+        details: error.message,
+      },
+    });
+  }
 });
 
 // API root endpoint

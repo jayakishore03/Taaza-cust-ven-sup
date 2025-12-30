@@ -205,6 +205,108 @@ export const addAddress = async (req, res, next) => {
 
     console.log('✅ All required fields present');
 
+    // Check if customers table exists (new consolidated structure)
+    // Wrap in try-catch to handle Supabase configuration errors gracefully
+    let customersTable = null;
+    let tableCheckError = null;
+    let useCustomersTable = false;
+
+    try {
+      const result = await supabaseAdmin
+        .from('customers')
+        .select('id')
+        .eq('auth_user_id', userId)
+        .limit(1)
+        .single();
+
+      customersTable = result.data;
+      tableCheckError = result.error;
+
+      // Check if it's a configuration error
+      if (tableCheckError && (
+        tableCheckError.message?.includes('Invalid API key') ||
+        tableCheckError.message?.includes('JWT') ||
+        tableCheckError.code === 'PGRST301' ||
+        tableCheckError.message?.includes('Supabase not configured')
+      )) {
+        console.log('⚠️  Supabase configuration error detected - falling back to addresses table');
+        console.log('   Error:', tableCheckError.message);
+        // Don't use customers table, fall through to addresses table
+        useCustomersTable = false;
+      } else if (customersTable && !tableCheckError) {
+        useCustomersTable = true;
+      }
+    } catch (error) {
+      console.log('⚠️  Error checking customers table - falling back to addresses table');
+      console.log('   Error:', error.message);
+      // Fall through to addresses table
+      useCustomersTable = false;
+    }
+
+    if (useCustomersTable && customersTable) {
+      // Use customers table with helper function
+      console.log('📝 Using customers table (consolidated structure)');
+      
+      const { data: functionResult, error: functionError } = await supabaseAdmin.rpc(
+        'add_customer_address',
+        {
+          customer_uuid: customersTable.id,
+          contact_name_val: contactName,
+          phone_val: phone,
+          street_val: street,
+          city_val: city,
+          state_val: state,
+          postal_code_val: postalCode,
+          landmark_val: landmark || '',
+          label_val: label || 'Home',
+          is_default_val: isDefault || false,
+        }
+      );
+
+      if (functionError) {
+        console.error('❌ ERROR calling add_customer_address function:', functionError);
+        throw functionError;
+      }
+
+      // Fetch the updated customer to get the address
+      const { data: customer, error: fetchError } = await supabaseAdmin
+        .from('customers')
+        .select('*')
+        .eq('id', customersTable.id)
+        .single();
+
+      if (fetchError) {
+        console.error('❌ ERROR fetching customer:', fetchError);
+        throw fetchError;
+      }
+
+      // Format the address response
+      const addressResponse = {
+        id: functionResult || customer.id,
+        contactName: customer.contact_name || contactName,
+        phone: customer.phone || phone,
+        street: customer.street || street,
+        city: customer.city || city,
+        state: customer.state || state,
+        postalCode: customer.postal_code || postalCode,
+        landmark: customer.landmark || landmark || undefined,
+        label: customer.address_label || label || 'Home',
+        isDefault: customer.is_default_address || isDefault || false,
+      };
+
+      console.log('✅ Address added to customers table successfully!');
+      console.log('   Address:', `${addressResponse.street}, ${addressResponse.city}, ${addressResponse.state}`);
+
+      res.status(201).json({
+        success: true,
+        data: addressResponse,
+      });
+      return;
+    }
+
+    // Fallback to old addresses table structure
+    console.log('📝 Using addresses table (legacy structure)');
+
     const addressData = {
       user_id: userId,
       contact_name: contactName,
@@ -233,7 +335,79 @@ export const addAddress = async (req, res, next) => {
       console.error('   Error Code:', error.code);
       console.error('   Error Message:', error.message);
       console.error('   Error Details:', JSON.stringify(error, null, 2));
-      throw error;
+      
+      // Check if it's a Supabase configuration error
+      if (error.message?.includes('Invalid API key') || 
+          error.message?.includes('Supabase not configured') ||
+          error.message?.includes('JWT') ||
+          error.code === 'PGRST301') {
+        const configError = new Error('Server configuration error. Supabase credentials are invalid or missing.');
+        configError.statusCode = 500;
+        throw configError;
+      }
+      
+      // Check if it's a database constraint error
+      if (error.code === '23505') { // Unique violation
+        const constraintError = new Error('This address already exists.');
+        constraintError.statusCode = 400;
+        throw constraintError;
+      }
+      
+      // Check if it's a foreign key error
+      if (error.code === '23503') {
+        // Try to fix by ensuring user exists in users table
+        console.log('⚠️  Foreign key error - checking if user exists...');
+        const { data: userCheck } = await supabaseAdmin
+          .from('users')
+          .select('id')
+          .eq('id', userId)
+          .single();
+        
+        if (!userCheck) {
+          const fkError = new Error('User not found. Please sign in again.');
+          fkError.statusCode = 400;
+          throw fkError;
+        }
+        
+        // User exists, might be a constraint issue - try without foreign key
+        console.log('⚠️  User exists but FK constraint failed. Attempting insert without FK...');
+        const { data: retryData, error: retryError } = await supabaseAdmin
+          .from('addresses')
+          .insert({
+            ...addressData,
+            user_id: userId, // Keep user_id but ignore FK constraint
+          })
+          .select()
+          .single();
+        
+        if (retryError) {
+          const dbError = new Error(retryError.message || 'Failed to save address to database.');
+          dbError.statusCode = 500;
+          throw dbError;
+        }
+        
+        // Success on retry
+        console.log('✅ Address created successfully (retry)!');
+        console.log('   Address ID:', retryData.id);
+        console.log('   Address:', `${retryData.street}, ${retryData.city}, ${retryData.state}`);
+        
+        await logActivity(req, 'ADDRESS_CREATED', 'New address added', 'address', retryData.id, {
+          label: label || 'Home',
+          city,
+          state,
+          isDefault: isDefault || false,
+        });
+
+        return res.status(201).json({
+          success: true,
+          data: formatAddress(retryData),
+        });
+      }
+      
+      // For other errors, include the actual error message
+      const dbError = new Error(error.message || 'Failed to save address to database.');
+      dbError.statusCode = 500;
+      throw dbError;
     }
 
     console.log('✅ Address created successfully!');
