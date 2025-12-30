@@ -74,29 +74,8 @@ export default function LoginScreen() {
         // Navigate immediately for fast user experience
         router.replace('/(tabs)');
         
-        // Load vendor profile data in the background (non-blocking)
-        // This happens after navigation so it doesn't delay the user
-        (async () => {
-          try {
-            const { getVendorProfile } = await import('@/services/api');
-            const vendorResult = await getVendorProfile();
-            if (vendorResult.success && vendorResult.data) {
-              // Vendor data is now stored in session storage
-              console.log('Vendor profile loaded:', vendorResult.data);
-              const nameFromData =
-                vendorResult.data?.shop?.storeName ||
-                vendorResult.data?.shop?.name ||
-                vendorResult.data?.user?.name ||
-                vendorResult.data?.user?.email;
-              if (nameFromData) {
-                setShopName(nameFromData);
-              }
-            }
-          } catch (vendorError) {
-            console.error('Error loading vendor profile:', vendorError);
-            // Continue even if vendor profile fails to load
-          }
-        })();
+        // Skip vendor profile API call - data already loaded from signInVendor
+        // This was causing additional delay. Shop data is already available from signInVendor
       } else {
         // Show error message with better formatting
         const errorMsg = result.error || 'Invalid mobile number or password';
@@ -189,7 +168,10 @@ export default function LoginScreen() {
                 </View>
               </View>
 
-              <TouchableOpacity style={styles.forgotPassword}>
+              <TouchableOpacity 
+                style={styles.forgotPassword}
+                onPress={() => router.push('/(auth)/forgot-password')}
+              >
                 <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
               </TouchableOpacity>
 

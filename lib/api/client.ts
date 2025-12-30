@@ -14,7 +14,14 @@ const getApiBaseUrl = () => {
   // Default to Vercel production endpoint
   // This works for both mobile devices and web
   // Your live API: https://taaza-customer.vercel.app/api
-  return 'https://taaza-customer.vercel.app/api';
+  const vercelUrl = 'https://taaza-customer.vercel.app/api';
+  
+  // Log in development to help debug
+  if (__DEV__) {
+    console.log('🌐 Using API URL:', vercelUrl);
+  }
+  
+  return vercelUrl;
 };
 
 const API_BASE_URL = getApiBaseUrl();
@@ -71,6 +78,16 @@ class ApiClient {
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
     
+    // Check if this is an authenticated endpoint and we have no token
+    const isAuthEndpoint = endpoint.includes('/users/') || 
+                          endpoint.includes('/orders') || 
+                          endpoint.includes('/cart');
+    
+    if (isAuthEndpoint && !this.token) {
+      // Don't make the request if we have no token for authenticated endpoints
+      throw new Error('Session expired. Please sign in again.');
+    }
+    
     try {
       // Add timeout for fetch requests (10 seconds)
       const controller = new AbortController();
@@ -102,7 +119,69 @@ class ApiClient {
       const data: ApiResponse<T> = await response.json();
 
       if (!response.ok || !data.success) {
-        // Log detailed error information for debugging
+        // Provide more user-friendly error messages
+        const errorMessage = data.error?.message || 'API request failed';
+        
+        // Check if this is a backend configuration error (Supabase not configured)
+        if (errorMessage.includes('Invalid API key') || errorMessage.includes('Supabase not configured') ||
+            errorMessage.includes('missing Supabase') || errorMessage.includes('Supabase Admin client not initialized')) {
+          // Don't log to console - this is expected when backend is not configured
+          // User will see the error in Alert dialog instead
+          // Error handler will suppress any console output for backend config errors
+          
+          throw new Error(
+            'Backend configuration error. The server is missing Supabase credentials. ' +
+            'Please contact support or check Vercel environment variables.'
+          );
+        }
+        
+        // Check if this is an authentication-related error (401 or 500 with auth-related messages)
+        const isAuthError = response.status === 401 || 
+                           errorMessage.includes('No token') ||
+                           errorMessage.includes('Invalid or expired token') ||
+                           errorMessage.includes('Authentication failed');
+        
+        // Handle authentication errors specifically
+        if (isAuthError) {
+          // Clear token on authentication errors
+          this.setToken(null);
+          
+          // Don't log expected auth errors - they're normal in certain situations
+          const isProfileEndpoint = url.includes('/users/profile');
+          const isSignInEndpoint = url.includes('/auth/signin');
+          const isExpectedAuthError = errorMessage.includes('Invalid API key') || 
+                                     errorMessage.includes('No token') || 
+                                     errorMessage.includes('Invalid or expired token') ||
+                                     errorMessage.includes('No account found') ||
+                                     errorMessage.includes('Invalid phone number or password');
+          
+          // Suppress logging for:
+          // 1. Profile endpoint with expected auth errors (user not logged in)
+          // 2. Sign-in endpoint with expected errors (wrong credentials - shown in UI, not console)
+          // 3. Address endpoints with expected auth errors (shown to user via Alert)
+          const isAddressEndpoint = url.includes('/users/addresses');
+          const shouldSuppressLog = (isProfileEndpoint && isExpectedAuthError) ||
+                                   (isSignInEndpoint && isExpectedAuthError) ||
+                                   (isAddressEndpoint && isExpectedAuthError);
+          
+          // Only log if it's an unexpected auth error
+          if (__DEV__ && !shouldSuppressLog) {
+            console.error('❌ API Error Details:');
+            console.error('  URL:', url);
+            console.error('  Status:', response.status);
+            console.error('  Success:', data.success);
+            console.error('  Error:', data.error);
+          }
+          
+          // For sign-in errors, return the actual error message (not "Session expired")
+          if (isSignInEndpoint) {
+            throw new Error(errorMessage);
+          }
+          
+          throw new Error('Session expired. Please sign in again.');
+        }
+        
+        // Log non-auth errors in development
         if (__DEV__) {
           console.error('❌ API Error Details:');
           console.error('  URL:', url);
@@ -110,7 +189,8 @@ class ApiClient {
           console.error('  Success:', data.success);
           console.error('  Error:', data.error);
         }
-        throw new Error(data.error?.message || 'API request failed');
+        
+        throw new Error(errorMessage);
       }
 
       return data.data as T;

@@ -97,5 +97,19 @@ export const authApi = {
   checkPhoneExists: async (phone: string): Promise<{ exists: boolean; message: string }> => {
     return apiClient.post('/auth/check-phone', { phone });
   },
+
+  /**
+   * Send OTP to email address
+   */
+  sendEmailOTP: async (email: string, purpose?: 'verification' | 'password-reset'): Promise<{ message: string; otp?: string }> => {
+    return apiClient.post('/auth/send-email-otp', { email, purpose });
+  },
+
+  /**
+   * Verify email OTP
+   */
+  verifyEmailOTP: async (email: string, otp: string): Promise<{ message: string; purpose?: string }> => {
+    return apiClient.post('/auth/verify-email-otp', { email, otp });
+  },
 };
 

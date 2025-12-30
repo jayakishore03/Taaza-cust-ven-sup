@@ -108,23 +108,46 @@ app.get('/health/supabase', async (req, res) => {
     const hasAnonKey = !!process.env.SUPABASE_ANON_KEY;
     const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
     
+    // Show partial keys for verification (first 20 chars)
+    const urlPreview = process.env.SUPABASE_URL ? 
+      `${process.env.SUPABASE_URL.substring(0, 30)}...` : 'NOT SET';
+    const anonKeyPreview = process.env.SUPABASE_ANON_KEY ? 
+      `${process.env.SUPABASE_ANON_KEY.substring(0, 20)}...` : 'NOT SET';
+    const serviceKeyPreview = process.env.SUPABASE_SERVICE_ROLE_KEY ? 
+      `${process.env.SUPABASE_SERVICE_ROLE_KEY.substring(0, 20)}...` : 'NOT SET';
+    
     // Try a simple query to verify connection
-    let connectionTest = { success: false, error: null };
+    let connectionTest = { success: false, error: null, details: null };
     if (supabaseAdmin && supabaseAdmin.from) {
       try {
-        const { error } = await supabaseAdmin
-          .from('addresses')
+        const { data, error } = await supabaseAdmin
+          .from('users')
           .select('id')
           .limit(1);
         
         if (error) {
-          connectionTest = { success: false, error: error.message };
+          connectionTest = { 
+            success: false, 
+            error: error.message,
+            code: error.code,
+            hint: error.hint,
+            details: error.details
+          };
         } else {
           connectionTest = { success: true, error: null };
         }
       } catch (err) {
-        connectionTest = { success: false, error: err.message };
+        connectionTest = { 
+          success: false, 
+          error: err.message,
+          stack: err.stack
+        };
       }
+    } else {
+      connectionTest = { 
+        success: false, 
+        error: 'Supabase admin client not initialized' 
+      };
     }
     
     res.json({
@@ -134,6 +157,9 @@ app.get('/health/supabase', async (req, res) => {
         hasUrl,
         hasAnonKey,
         hasServiceKey,
+        urlPreview,
+        anonKeyPreview,
+        serviceKeyPreview,
         connectionTest,
       },
       timestamp: new Date().toISOString(),
@@ -144,6 +170,7 @@ app.get('/health/supabase', async (req, res) => {
       error: {
         message: 'Failed to check Supabase configuration',
         details: error.message,
+        stack: error.stack,
       },
     });
   }

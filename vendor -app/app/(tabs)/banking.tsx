@@ -21,6 +21,7 @@ import {
   EyeOff,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const initialBalance = Math.floor(Math.random() * 50000) + 10000;
 
@@ -28,15 +29,15 @@ export default function BankingScreen() {
   const [showAccountNumber, setShowAccountNumber] = useState(false);
   const [autoWithdrawal, setAutoWithdrawal] = useState(true);
   const [bankingData, setBankingData] = useState({
-    accountHolderName: 'Saikiran Konapala',
-    bankName: 'State Bank of India',
+    accountHolderName: '',
+    bankName: '',
     accountNumber: '',
     confirmAccountNumber: '',
-    ifscCode: 'SBIN0001234',
-    accountType: 'Savings',
-    branchName: 'Currency Nagar,Vijayawada',
-    upiId: '9492664870@paytm',
-    minimumBalance: '1000',
+    ifscCode: '',
+    accountType: '',
+    branchName: '',
+    upiId: '',
+    minimumBalance: '0',
   });
 
   const animatedBalance = useRef(new Animated.Value(initialBalance)).current;
@@ -51,6 +52,37 @@ export default function BankingScreen() {
     return () => {
       animatedBalance.removeAllListeners();
     };
+  }, []);
+
+  // Load banking details saved at registration time from cached vendor/shop data
+  useEffect(() => {
+    const loadBankingDetails = async () => {
+      try {
+        const vendorDataStr = await AsyncStorage.getItem('vendor_data');
+        if (!vendorDataStr) {
+          return;
+        }
+
+        const vendorData = JSON.parse(vendorDataStr);
+        const shop = vendorData.shop || {};
+
+        setBankingData(prev => ({
+          ...prev,
+          accountHolderName: shop.account_holder_name || prev.accountHolderName,
+          bankName: shop.bank_name || prev.bankName,
+          accountNumber: shop.account_number || prev.accountNumber,
+          confirmAccountNumber: shop.account_number || prev.confirmAccountNumber,
+          ifscCode: shop.ifsc_code || prev.ifscCode,
+          accountType: shop.account_type || prev.accountType,
+          branchName: shop.bank_branch || prev.branchName,
+          // UPI ID and minimum balance are not stored in shop; keep any existing or leave blank/default
+        }));
+      } catch (error) {
+        console.error('[BankingScreen] Error loading banking details:', error);
+      }
+    };
+
+    loadBankingDetails();
   }, []);
 
   const updateField = (field: keyof typeof bankingData, value: string) => {

@@ -3,10 +3,17 @@
 
 // Log environment variables status (without exposing secrets)
 console.log('🔍 Environment Check on Function Start:');
-console.log('  SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ SET' : '❌ MISSING');
-console.log('  SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? '✅ SET' : '❌ MISSING');
-console.log('  SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? '✅ SET' : '❌ MISSING');
+console.log('  SUPABASE_URL:', process.env.SUPABASE_URL ? `✅ SET (${process.env.SUPABASE_URL.substring(0, 30)}...)` : '❌ MISSING');
+console.log('  SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? `✅ SET (${process.env.SUPABASE_ANON_KEY.substring(0, 20)}...)` : '❌ MISSING');
+console.log('  SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? `✅ SET (${process.env.SUPABASE_SERVICE_ROLE_KEY.substring(0, 20)}...)` : '❌ MISSING');
 console.log('  NODE_ENV:', process.env.NODE_ENV || 'not set');
+
+// If environment variables are missing, log a warning
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+  console.error('⚠️  WARNING: Supabase environment variables are missing!');
+  console.error('   This will cause "Invalid API key" errors.');
+  console.error('   Please check Vercel Dashboard → Settings → Environment Variables');
+}
 
 let app;
 

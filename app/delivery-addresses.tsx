@@ -11,9 +11,10 @@ const addressLabels = ['Home', 'Office', 'Other'];
 export default function DeliveryAddressesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, addAddress, updateUserAddress, deleteAddress, setDefaultAddress } = useAuth();
+  const { user, isAuthenticated, addAddress, updateUserAddress, deleteAddress, setDefaultAddress } = useAuth();
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingAddress, setEditingAddress] = useState<Address | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [addressForm, setAddressForm] = useState<Omit<Address, 'id'>>({
     contactName: '',
     phone: '',
@@ -88,15 +89,53 @@ export default function DeliveryAddressesScreen() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => {
-            deleteAddress(addressId);
+          onPress: async () => {
+            try {
+              await deleteAddress(addressId);
+    } catch (error: any) {
+      // Only log unexpected errors (not session/auth errors that are shown to user)
+      const errorMsg = error?.message || '';
+      const isExpectedError = 
+        errorMsg.includes('Session expired') || 
+        errorMsg.includes('session has expired') ||
+        errorMsg.includes('Invalid API key') ||
+        errorMsg.includes('Backend configuration error') ||
+        errorMsg.includes('User not authenticated');
+      
+      if (!isExpectedError && __DEV__) {
+        console.error('Error deleting address:', error);
+      }
+      
+      const errorMessage = errorMsg || 'Failed to delete address. Please try again.';
+              Alert.alert(
+                'Error',
+                errorMessage,
+                [{ text: 'OK' }]
+              );
+            }
           },
         },
       ]
     );
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    // Check if user is authenticated
+    if (!isAuthenticated || !user) {
+      Alert.alert(
+        'Authentication Required',
+        'Please sign in to save addresses.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Sign In',
+            onPress: () => router.push('/signin'),
+          },
+        ]
+      );
+      return;
+    }
+
     const requiredFields: Array<keyof typeof addressForm> = [
       'contactName',
       'phone',
@@ -116,39 +155,150 @@ export default function DeliveryAddressesScreen() {
       return;
     }
 
-    const newAddress: Address = {
-      id: editingAddress?.id || `addr-${Date.now()}`,
-      contactName: addressForm.contactName.trim(),
-      phone: addressForm.phone.trim(),
-      street: addressForm.street.trim(),
-      city: addressForm.city.trim(),
-      state: addressForm.state.trim(),
-      postalCode: addressForm.postalCode.trim(),
-      landmark: addressForm.landmark?.trim() || '',
-      label: addressForm.label || 'Home',
-      isDefault: addressForm.isDefault || false,
-    };
+    setIsSaving(true);
+    try {
+      const newAddress: Address = {
+        id: editingAddress?.id || `addr-${Date.now()}`,
+        contactName: addressForm.contactName.trim(),
+        phone: addressForm.phone.trim(),
+        street: addressForm.street.trim(),
+        city: addressForm.city.trim(),
+        state: addressForm.state.trim(),
+        postalCode: addressForm.postalCode.trim(),
+        landmark: addressForm.landmark?.trim() || '',
+        label: addressForm.label || 'Home',
+        isDefault: addressForm.isDefault || false,
+      };
 
-    if (editingAddress) {
-      const addressId = editingAddress.id || `addr-${user?.id}-${allAddresses.indexOf(editingAddress)}`;
-      updateUserAddress(addressId, newAddress);
-      if (newAddress.isDefault && newAddress.id) {
-        setDefaultAddress(newAddress.id);
+      if (editingAddress) {
+        const addressId = editingAddress.id || `addr-${user?.id}-${allAddresses.indexOf(editingAddress)}`;
+        await updateUserAddress(addressId, newAddress);
+        
+        // Set as default if requested
+        if (newAddress.isDefault) {
+          // Wait for the address to be saved first, then get the actual ID from the response
+          // The updateUserAddress will refresh the profile, so we need to use the addressId
+          try {
+            await setDefaultAddress(addressId);
+          } catch (defaultError: any) {
+            console.warn('Error setting default address:', defaultError);
+            // Don't fail the whole operation if setting default fails
+          }
+        }
+      } else {
+        // For new addresses, the backend will generate a UUID
+        // We need to wait for the response to get the actual ID
+        const createdAddress = await addAddress(newAddress);
+        
+        // Set as default if requested
+        if (newAddress.isDefault && createdAddress.id) {
+          try {
+            await setDefaultAddress(createdAddress.id);
+          } catch (defaultError: any) {
+            console.warn('Error setting default address:', defaultError);
+            // Don't fail the whole operation if setting default fails
+          }
+        }
       }
-    } else {
-      addAddress(newAddress);
-      if (newAddress.isDefault && newAddress.id) {
-        setDefaultAddress(newAddress.id);
+
+      // Only close modal and reset form if save was successful
+      setShowAddModal(false);
+      resetForm();
+      Alert.alert('Success', editingAddress ? 'Address updated successfully!' : 'Address saved successfully!');
+    } catch (error: any) {
+      // Extract error message
+      const errorMsg = error?.message || 'Failed to save address. Please check your connection and try again.';
+      
+      // Only log unexpected errors in development
+      const isExpectedError = 
+        errorMsg.includes('Session expired') || 
+        errorMsg.includes('session has expired') ||
+        errorMsg.includes('Invalid API key') ||
+        errorMsg.includes('Backend configuration error') ||
+        errorMsg.includes('Server configuration error') ||
+        errorMsg.includes('User not authenticated') ||
+        errorMsg.includes('Incomplete Address') ||
+        errorMsg.includes('Cannot connect') ||
+        errorMsg.includes('timeout') ||
+        errorMsg.includes('Missing required fields');
+      
+      if (!isExpectedError && __DEV__) {
+        console.error('Error saving address:', error);
       }
+      
+      // Handle session expired - redirect to sign in
+      if (errorMsg.includes('session has expired') || errorMsg.includes('Session expired')) {
+        Alert.alert(
+          'Session Expired',
+          'Your session has expired. Please sign in again to save addresses.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Sign In',
+              onPress: () => {
+                setShowAddModal(false);
+                resetForm();
+                router.push('/signin');
+              },
+            },
+          ]
+        );
+      } 
+      // Handle server configuration errors - provide helpful message
+      else if (errorMsg.includes('Server configuration error') || errorMsg.includes('Backend configuration error')) {
+        Alert.alert(
+          'Server Error',
+          'The server is not properly configured. Please contact support or try again later.\n\nIf you are the administrator, make sure Supabase environment variables are set in Vercel.',
+          [{ text: 'OK' }]
+        );
+      }
+      // Handle network errors
+      else if (errorMsg.includes('Cannot connect') || errorMsg.includes('timeout')) {
+        Alert.alert(
+          'Connection Error',
+          'Cannot connect to the server. Please check your internet connection and try again.',
+          [{ text: 'OK' }]
+        );
+      }
+      // Handle other errors
+      else {
+        Alert.alert(
+          'Error Saving Address',
+          errorMsg,
+          [{ text: 'OK' }]
+        );
+      }
+      // Don't close the modal on error so user can fix and retry (unless redirecting to sign in)
+    } finally {
+      setIsSaving(false);
     }
-
-    setShowAddModal(false);
-    resetForm();
   };
 
-  const handleSetDefault = (address: Address) => {
-    const addressId = address.id || `addr-${user?.id}-${allAddresses.indexOf(address)}`;
-    setDefaultAddress(addressId);
+  const handleSetDefault = async (address: Address) => {
+    try {
+      const addressId = address.id || `addr-${user?.id}-${allAddresses.indexOf(address)}`;
+      await setDefaultAddress(addressId);
+    } catch (error: any) {
+      // Only log unexpected errors (not session/auth errors that are shown to user)
+      const errorMsg = error?.message || '';
+      const isExpectedError = 
+        errorMsg.includes('Session expired') || 
+        errorMsg.includes('session has expired') ||
+        errorMsg.includes('Invalid API key') ||
+        errorMsg.includes('Backend configuration error') ||
+        errorMsg.includes('User not authenticated');
+      
+      if (!isExpectedError && __DEV__) {
+        console.error('Error setting default address:', error);
+      }
+      
+      const errorMessage = errorMsg || 'Failed to set default address. Please try again.';
+      Alert.alert(
+        'Error',
+        errorMessage,
+        [{ text: 'OK' }]
+      );
+    }
   };
 
   const getLabelIcon = (label?: string) => {
@@ -400,10 +550,13 @@ export default function DeliveryAddressesScreen() {
                 <Text style={styles.modalButtonCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonSave]}
+                style={[styles.modalButton, styles.modalButtonSave, isSaving && styles.modalButtonDisabled]}
                 onPress={handleSave}
+                disabled={isSaving}
               >
-                <Text style={styles.modalButtonSaveText}>Save</Text>
+                <Text style={styles.modalButtonSaveText}>
+                  {isSaving ? 'Saving...' : 'Save'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -694,6 +847,9 @@ const styles = StyleSheet.create({
   },
   modalButtonSave: {
     backgroundColor: '#DC2626',
+  },
+  modalButtonDisabled: {
+    opacity: 0.6,
   },
   modalButtonCancelText: {
     color: '#6B7280',

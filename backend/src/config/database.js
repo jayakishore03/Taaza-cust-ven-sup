@@ -14,11 +14,25 @@ let supabase;
 let supabaseAdmin;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('❌ Missing Supabase environment variables!');
-  console.error(`SUPABASE_URL: ${supabaseUrl ? 'SET' : 'MISSING'}`);
-  console.error(`SUPABASE_ANON_KEY: ${supabaseAnonKey ? 'SET' : 'MISSING'}`);
-  console.error(`SUPABASE_SERVICE_ROLE_KEY: ${supabaseServiceRoleKey ? 'SET' : 'MISSING'}`);
-  console.error('⚠️  API will return errors for database operations');
+  console.error('========================================');
+  console.error('❌ CRITICAL: Missing Supabase environment variables!');
+  console.error('========================================');
+  console.error(`SUPABASE_URL: ${supabaseUrl ? '✅ SET' : '❌ MISSING'}`);
+  console.error(`SUPABASE_ANON_KEY: ${supabaseAnonKey ? '✅ SET' : '❌ MISSING'}`);
+  console.error(`SUPABASE_SERVICE_ROLE_KEY: ${supabaseServiceRoleKey ? '✅ SET' : '❌ MISSING'}`);
+  console.error('');
+  console.error('⚠️  API will return "Invalid API key" errors for all database operations');
+  console.error('');
+  console.error('🔧 TO FIX:');
+  console.error('   1. Go to Vercel Dashboard → Your Project → Settings → Environment Variables');
+  console.error('   2. Add these variables:');
+  console.error('      - SUPABASE_URL');
+  console.error('      - SUPABASE_ANON_KEY');
+  console.error('      - SUPABASE_SERVICE_ROLE_KEY');
+  console.error('   3. Redeploy your project');
+  console.error('');
+  console.error('📖 See VERCEL_ENV_SETUP_GUIDE.md for detailed instructions');
+  console.error('========================================');
   
   // Create mock client that returns errors
   const createMockQuery = () => ({
@@ -47,12 +61,28 @@ if (!supabaseUrl || !supabaseAnonKey) {
   supabaseAdmin = mockClient;
 } else {
   // Create Supabase client for regular operations (uses anon key, respects RLS)
-  supabase = createClient(supabaseUrl, supabaseAnonKey);
+  try {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+    console.log('✅ Supabase client initialized with anon key');
+  } catch (error) {
+    console.error('❌ Failed to create Supabase client:', error);
+    throw error;
+  }
   
   // Create Supabase admin client for admin operations (uses service role key, bypasses RLS)
-  supabaseAdmin = supabaseServiceRoleKey
-    ? createClient(supabaseUrl, supabaseServiceRoleKey)
-    : supabase;
+  if (supabaseServiceRoleKey) {
+    try {
+      supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+      console.log('✅ Supabase admin client initialized with service role key');
+    } catch (error) {
+      console.error('❌ Failed to create Supabase admin client:', error);
+      console.error('⚠️  Falling back to regular Supabase client (may have RLS restrictions)');
+      supabaseAdmin = supabase;
+    }
+  } else {
+    console.warn('⚠️  SUPABASE_SERVICE_ROLE_KEY not provided, using regular client');
+    supabaseAdmin = supabase;
+  }
 }
 
 // Wrap Supabase clients to add custom RPC functions

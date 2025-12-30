@@ -16,6 +16,9 @@ export default function Step5BankDetails() {
   const [confirmAccountNumber, setConfirmAccountNumber] = useState('');
   const [accountHolderName, setAccountHolderName] = useState('');
   const [bankName, setBankName] = useState('');
+  const [accountType, setAccountType] = useState('');
+  const [branchName, setBranchName] = useState('');
+  const [upiId, setUpiId] = useState('');
 
   // Load existing bank details from registration data
   useEffect(() => {
@@ -24,6 +27,9 @@ export default function Step5BankDetails() {
       setAccountNumber(registrationData.bankDetails.accountNumber || '');
       setAccountHolderName(registrationData.bankDetails.accountHolderName || '');
       setBankName(registrationData.bankDetails.bankName || '');
+      setAccountType(registrationData.bankDetails.accountType || '');
+      setBranchName(registrationData.bankDetails.bankBranch || '');
+      setUpiId(registrationData.bankDetails.upiId || '');
     }
   }, []);
 
@@ -36,19 +42,22 @@ export default function Step5BankDetails() {
           accountNumber: accountNumber.trim(),
           accountHolderName: accountHolderName.trim(),
           bankName: bankName.trim(),
+          accountType: accountType.trim(),
+          bankBranch: branchName.trim(),
+          upiId: upiId.trim(),
         },
       });
     };
 
     // Debounce: only save if there's actual data
-    if (ifsc || accountNumber || accountHolderName || bankName) {
+    if (ifsc || accountNumber || accountHolderName || bankName || accountType || branchName || upiId) {
       const timeoutId = setTimeout(() => {
         saveBankDetails();
       }, 500); // Save after 500ms of no changes
 
       return () => clearTimeout(timeoutId);
     }
-  }, [ifsc, accountNumber, accountHolderName, bankName, updateRegistrationData]);
+  }, [ifsc, accountNumber, accountHolderName, bankName, accountType, branchName, upiId, updateRegistrationData]);
 
   const goBack = () => router.back();
 
@@ -66,6 +75,9 @@ export default function Step5BankDetails() {
         accountNumber: accountNumber.trim(),
         accountHolderName: accountHolderName.trim(),
         bankName: bankName.trim(),
+        accountType: accountType.trim(),
+        bankBranch: branchName.trim(),
+        upiId: upiId.trim(),
       },
     });
 
@@ -179,6 +191,34 @@ export default function Step5BankDetails() {
           value={bankName}
           onChangeText={setBankName}
           placeholder="Enter Bank Name"
+        />
+
+        {/* Account Type */}
+        <Text style={styles.label}>6️⃣ Account Type</Text>
+        <TextInput
+          style={styles.input}
+          value={accountType}
+          onChangeText={setAccountType}
+          placeholder="Savings / Current"
+        />
+
+        {/* Branch Name */}
+        <Text style={styles.label}>7️⃣ Branch Name</Text>
+        <TextInput
+          style={styles.input}
+          value={branchName}
+          onChangeText={setBranchName}
+          placeholder="Enter Branch Name"
+        />
+
+        {/* UPI ID */}
+        <Text style={styles.label}>8️⃣ UPI ID</Text>
+        <TextInput
+          style={styles.input}
+          value={upiId}
+          onChangeText={setUpiId}
+          placeholder="your-upi@bank"
+          autoCapitalize="none"
         />
 
         </ScrollView>

@@ -24,10 +24,31 @@ export default function CheckoutScreen() {
   const [orderCount, setOrderCount] = useState<number | null>(null);
   const [userCoordinates, setUserCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
   const [specialInstructions, setSpecialInstructions] = useState('');
-  const { user, isAuthenticated, updateAddress} = useAuth();
+  const { user, isAuthenticated } = useAuth();
 
-  // Create empty address template
-  const emptyAddress: Address = {
+  // Get default address from user's addresses (from profile)
+  const getDefaultAddress = useMemo<Address | null>(() => {
+    if (!user) return null;
+    
+    // First check if user has addresses array
+    if (user.addresses && user.addresses.length > 0) {
+      // Find default address
+      const defaultAddr = user.addresses.find(addr => addr.isDefault);
+      if (defaultAddr) return defaultAddr;
+      // If no default, use first address
+      return user.addresses[0];
+    }
+    
+    // Fallback to legacy user.address
+    if (user.address) {
+      return user.address;
+    }
+    
+    return null;
+  }, [user]);
+
+  // Create empty address template (memoized to update when user changes)
+  const emptyAddress = useMemo<Address>(() => ({
     id: '',
     contactName: user?.name || '',
     phone: user?.phone || '',
@@ -37,16 +58,35 @@ export default function CheckoutScreen() {
     postalCode: '',
     landmark: '',
     label: 'Home',
-    isDefault: true,
-  };
+    isDefault: false,
+  }), [user?.name, user?.phone]);
 
-  const defaultAddress = useMemo<Address>(
-    () => (user?.address ? { ...user.address } : emptyAddress),
-    [user]
-  );
-
-  const [address, setAddress] = useState<Address>(defaultAddress);
-  const [addressForm, setAddressForm] = useState<Address>(defaultAddress);
+  // Use default address from profile, or empty if none exists
+  // Initialize with a basic empty address, useEffect will set the correct one
+  const [address, setAddress] = useState<Address>(() => ({
+    id: '',
+    contactName: '',
+    phone: '',
+    street: '',
+    city: '',
+    state: '',
+    postalCode: '',
+    landmark: '',
+    label: 'Home',
+    isDefault: false,
+  }));
+  const [addressForm, setAddressForm] = useState<Address>(() => ({
+    id: '',
+    contactName: '',
+    phone: '',
+    street: '',
+    city: '',
+    state: '',
+    postalCode: '',
+    landmark: '',
+    label: 'Home',
+    isDefault: false,
+  }));
   const { cartItems, getTotalPrice, selectedShop } = useCart();
 
   const addOns = dummyAddOns;
@@ -99,11 +139,28 @@ export default function CheckoutScreen() {
 
   // Update address when user profile changes
   useEffect(() => {
-    if (user?.address) {
-      setAddress(user.address);
-      setAddressForm(user.address);
+    const defaultAddr = getDefaultAddress;
+    if (defaultAddr) {
+      setAddress(defaultAddr);
+      setAddressForm(defaultAddr);
+    } else {
+      // Reset to empty address if no default exists
+      const empty: Address = {
+        id: '',
+        contactName: user?.name || '',
+        phone: user?.phone || '',
+        street: '',
+        city: '',
+        state: '',
+        postalCode: '',
+        landmark: '',
+        label: 'Home',
+        isDefault: false,
+      };
+      setAddress(empty);
+      setAddressForm(empty);
     }
-  }, [user?.address]);
+  }, [getDefaultAddress, user]);
 
   // Calculate distance-based delivery charge
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -150,13 +207,21 @@ export default function CheckoutScreen() {
   const subtotal = getTotalPrice();
   const total = subtotal + deliveryCharge - discount;
 
-  useEffect(() => {
-    setAddress(defaultAddress);
-    setAddressForm(defaultAddress);
-  }, [defaultAddress]);
-
   const handleChangeAddress = () => {
-    setAddressForm(address);
+    // Reset form to current address or empty template
+    const formAddress = address.street ? { ...address } : {
+      id: '',
+      contactName: user?.name || '',
+      phone: user?.phone || '',
+      street: '',
+      city: '',
+      state: '',
+      postalCode: '',
+      landmark: '',
+      label: 'Home',
+      isDefault: false,
+    };
+    setAddressForm(formAddress);
     setShowAddressModal(true);
   };
 
@@ -199,13 +264,13 @@ export default function CheckoutScreen() {
       state: addressForm.state.trim(),
       postalCode: addressForm.postalCode.trim(),
       landmark: addressForm.landmark?.trim() || '',
+      // Don't save this as default - it's just for this order
+      isDefault: false,
     };
 
+    // Set address for this order only (temporary, not saved to profile)
     setAddress(sanitizedAddress);
     setAddressForm(sanitizedAddress);
-    if (isAuthenticated) {
-      updateAddress(sanitizedAddress);
-    }
     setShowAddressModal(false);
   };
 
@@ -236,13 +301,23 @@ export default function CheckoutScreen() {
       return;
     }
 
+    // Validate shop is selected
+    if (!selectedShop || !selectedShop.id) {
+      Alert.alert('Shop Required', 'Please select a shop before placing your order.', [
+        { text: 'OK', onPress: () => router.push('/(tabs)') }
+      ]);
+      return;
+    }
+
     // Validate address has required fields
     if (!address.street || !address.city || !address.state || !address.postalCode) {
       Alert.alert('Address Required', 'Please fill in all address fields before placing order.');
       return;
     }
 
-    let finalAddressId = user?.address?.id || '';
+    // Use the address ID if it exists (from saved addresses), otherwise use empty string
+    // The backend will handle creating a new address if needed
+    let finalAddressId = address.id || '';
 
     // Navigate immediately for better UX
     router.push({
@@ -253,16 +328,19 @@ export default function CheckoutScreen() {
         discount: discount.toString(),
         addressId: finalAddressId,
         specialInstructions: specialInstructions.trim(),
+        // Pass address details as JSON string for manual addresses
+        addressData: JSON.stringify({
+          contactName: address.contactName,
+          phone: address.phone,
+          street: address.street,
+          city: address.city,
+          state: address.state,
+          postalCode: address.postalCode,
+          landmark: address.landmark,
+          label: address.label,
+        }),
       },
     });
-
-    // Save address in background (non-blocking)
-    if (isAuthenticated && address) {
-      updateAddress(address).catch((error) => {
-        console.error('Background address save failed:', error);
-        // Don't show error to user since they're already on payment page
-      });
-    }
   };
 
   return (
@@ -279,10 +357,25 @@ export default function CheckoutScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 200 }]}>
         <View>
+          {/* Shop Information */}
+          {selectedShop && (
+            <View style={styles.shopSection}>
+              <View style={styles.shopSectionHeader}>
+                <Text style={styles.shopSectionTitle}>Ordering from</Text>
+              </View>
+              <View style={styles.shopInfo}>
+                <Text style={styles.shopName}>{selectedShop.name}</Text>
+                {selectedShop.address && (
+                  <Text style={styles.shopAddress}>{selectedShop.address}</Text>
+                )}
+              </View>
+            </View>
+          )}
+
           <View style={styles.deliverySection}>
             <View style={styles.deliverySectionHeader}>
               <MapPin size={20} color="#DC2626" strokeWidth={2} />
-              <Text style={styles.deliverySectionTitle}>Deliver to {address.label || 'Home'}</Text>
+              <Text style={styles.deliverySectionTitle}>Delivery Address</Text>
             </View>
             {address.street ? (
               <>
@@ -297,16 +390,16 @@ export default function CheckoutScreen() {
                   {address.landmark ? `\nLandmark: ${address.landmark}` : ''}
                 </Text>
                 <TouchableOpacity style={styles.changeButton} onPress={handleChangeAddress}>
-                  <Text style={styles.changeButtonText}>Change</Text>
+                  <Text style={styles.changeButtonText}>Change Delivery Address</Text>
                 </TouchableOpacity>
               </>
             ) : (
               <>
                 <Text style={styles.deliveryAddressEmpty}>
-                  No delivery address set
+                  No delivery address set. Please add a delivery address to continue.
                 </Text>
                 <TouchableOpacity style={styles.addAddressButton} onPress={handleChangeAddress}>
-                  <Text style={styles.addAddressButtonText}>Add Address</Text>
+                  <Text style={styles.addAddressButtonText}>Enter Delivery Address</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -437,7 +530,7 @@ export default function CheckoutScreen() {
           <View style={styles.modalOverlayContent}>
             <View style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Update Delivery Address</Text>
+                <Text style={styles.modalTitle}>Enter Delivery Address</Text>
                 <TouchableOpacity onPress={() => setShowAddressModal(false)}>
                   <X size={24} color="#1F2937" strokeWidth={2} />
                 </TouchableOpacity>
@@ -599,6 +692,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 80,
+  },
+  shopSection: {
+    backgroundColor: '#FEF3C7',
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+  },
+  shopSectionHeader: {
+    marginBottom: 8,
+  },
+  shopSectionTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#92400E',
+    letterSpacing: 0.5,
+  },
+  shopInfo: {
+    gap: 4,
+  },
+  shopName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#78350F',
+  },
+  shopAddress: {
+    fontSize: 13,
+    color: '#A16207',
   },
   deliverySection: {
     backgroundColor: '#FFFFFF',

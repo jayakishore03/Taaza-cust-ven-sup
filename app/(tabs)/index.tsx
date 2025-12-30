@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, ActivityIndicator, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, ActivityIndicator, TextInput, RefreshControl } from 'react-native';
 import { useState, useEffect } from 'react';
 import { MapPin, RefreshCw, Search, X } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
@@ -15,11 +15,47 @@ import { useCart } from '../../contexts/CartContext';
 import { productsApi, shopsApi } from '../../lib/api';
 import { getAuthToken } from '../../lib/auth/helper';
 import { useAuth } from '../../contexts/AuthContext';
+import { useProducts } from '../../contexts/ProductsContext';
 
 const categories = [...CATEGORIES];
 
+// Map shop type to product category
+const getCategoryFromShopType = (shopType: string | undefined): string => {
+  if (!shopType) return 'Chicken'; // Default
+  
+  const shopTypeLower = shopType.toLowerCase();
+  switch (shopTypeLower) {
+    case 'chicken':
+      return 'Chicken';
+    case 'mutton':
+      return 'Mutton';
+    case 'pork':
+      return 'Pork';
+    case 'meat':
+      return 'Seafood'; // As per user requirement
+    case 'multi':
+      return 'Chicken'; // Default for multi, but will show all categories
+    default:
+      return 'Chicken';
+  }
+};
+
+// Get available categories based on shop type
+const getAvailableCategories = (shopType: string | undefined): string[] => {
+  if (!shopType) return ['All', ...CATEGORIES];
+  
+  const shopTypeLower = shopType.toLowerCase();
+  if (shopTypeLower === 'multi') {
+    return ['All', ...CATEGORIES]; // Show all categories for multi shops
+  }
+  
+  // For specific shop types, show "All" and the specific category
+  const category = getCategoryFromShopType(shopType);
+  return ['All', category];
+};
+
 export default function HomeScreen() {
-  const [selectedCategory, setSelectedCategory] = useState('Chicken');
+  const [selectedCategory, setSelectedCategory] = useState('All'); // Default to "All" to show all products
   const [location, setLocation] = useState<string>('Fetching location...');
   const [userCoordinates, setUserCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);
@@ -30,6 +66,7 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const { addToCart, selectedShop, setSelectedShop } = useCart();
   const { user } = useAuth();
+  const { getProductsByShopType, isLoading: isLoadingAllProducts, refreshProducts, isRefreshing } = useProducts();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -232,62 +269,34 @@ export default function HomeScreen() {
     }
   }, [shops, isLoadingShops]);
 
-  // Load products when category or shop changes
+  // Load products when shop changes - INSTANT using cached products
   useEffect(() => {
-    const fetchProducts = async () => {
-      if (!selectedShop) {
-        setProducts([]);
-        return;
-      }
-      
-      try {
-        setIsLoadingProducts(true);
-        console.log('[HomeScreen] Fetching products:', {
-          category: selectedCategory,
-          shopId: selectedShop.id,
-          shopName: selectedShop.name,
-        });
-        
-        // Use Supabase directly to filter by shop_id and is_available
-        // This ensures we get the latest prices updated by vendors
-        const { getProductsByCategory } = await import('../../lib/services/products');
-        const productsData = await getProductsByCategory(selectedCategory, selectedShop.id);
-        
-        console.log('[HomeScreen] Products loaded:', productsData.length);
-        
-        // Log prices for verification
-        if (__DEV__ && productsData.length > 0) {
-          productsData.forEach((product) => {
-            console.log(`[HomeScreen] Product: ${product.name} - Price: ₹${product.price} (₹${product.pricePerKg}/kg)`);
-          });
-        }
-        
-        if (productsData.length === 0) {
-          console.warn('[HomeScreen] No products found. Trying without shop filter...');
-          // Fallback: try to get products without shop filter if none found
-          const allProducts = await getProductsByCategory(selectedCategory);
-          console.log('[HomeScreen] Products without shop filter:', allProducts.length);
-          setProducts(allProducts);
-        } else {
-          setProducts(productsData);
-        }
-      } catch (error) {
-        // Handle errors gracefully without showing alerts
-        console.error('[HomeScreen] Error loading products:', error);
-        if (__DEV__) {
-          const errorMessage = error instanceof Error ? error.message : 'Failed to load products';
-          console.warn('Products not available:', errorMessage.includes('timeout') || errorMessage.includes('connect') 
-            ? 'Backend connection issue' 
-            : errorMessage);
-        }
-        setProducts([]);
-      } finally {
-        setIsLoadingProducts(false);
-      }
-    };
+    if (!selectedShop) {
+      setProducts([]);
+      return;
+    }
     
-    fetchProducts();
-  }, [selectedCategory, selectedShop]);
+    // INSTANT: Get products from cache (no API call, no delay!)
+    const startTime = Date.now();
+    const shopType = selectedShop.vendor?.shopType || 'chicken';
+    
+    console.log('[HomeScreen] Loading products for shop type:', shopType);
+    
+    // Get products instantly from cache
+    const cachedProducts = getProductsByShopType(shopType);
+    
+    const loadTime = Date.now() - startTime;
+    console.log(`[HomeScreen] ⚡ Products loaded INSTANTLY in ${loadTime}ms (${cachedProducts.length} products)`);
+    
+    // Log prices for verification
+    if (__DEV__ && cachedProducts.length > 0) {
+      cachedProducts.slice(0, 5).forEach((product) => {
+        console.log(`[HomeScreen] Product: ${product.name} - Category: ${product.category} - Price: ₹${product.price} (₹${product.pricePerKg}/kg)`);
+      });
+    }
+    
+    setProducts(cachedProducts);
+  }, [selectedShop, getProductsByShopType]);
 
   // Get location on component mount
   useEffect(() => {
@@ -317,6 +326,8 @@ export default function HomeScreen() {
 
   const handleShopSelect = (shop: Shop) => {
     setSelectedShop(shop);
+    // Reset to "All" category to show all products for the shop
+    setSelectedCategory('All');
   };
 
   const handleChangeShop = () => {
@@ -327,20 +338,46 @@ export default function HomeScreen() {
     setSearchQuery('');
   };
 
-  // Filter products based on search query
+  // Handle pull-to-refresh
+  const handleRefresh = async () => {
+    await refreshProducts();
+  };
+
+  // Filter products based on category and search query
   const filteredProducts = products.filter((product) => {
-    if (!searchQuery.trim()) return true;
+    // Filter by search query if provided
+    if (searchQuery.trim()) {
     const query = searchQuery.toLowerCase();
-    return (
+      const matchesSearch = (
       product.name?.toLowerCase().includes(query) ||
       product.category?.toLowerCase().includes(query) ||
       product.description?.toLowerCase().includes(query)
     );
+      if (!matchesSearch) return false;
+    }
+    
+    // If no category is selected or "All" is selected, show all products
+    // Otherwise filter by selected category
+    if (!selectedCategory || selectedCategory === 'All') {
+      return true;
+    }
+    
+    return product.category === selectedCategory;
   });
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor="#DC2626"
+            colors={['#DC2626']}
+          />
+        }
+      >
         <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
           <TouchableOpacity 
             style={styles.locationBar}
@@ -435,7 +472,10 @@ export default function HomeScreen() {
                     {shop.vendor?.shopType && (
                       <Text style={styles.shopType}>🏪 {shop.vendor.shopType.charAt(0).toUpperCase() + shop.vendor.shopType.slice(1)}</Text>
                     )}
-                    <Text style={styles.shopDistance}>📍 {shop.distance}</Text>
+                    {shop.address && (
+                      <Text style={styles.shopAddress} numberOfLines={1}>📍 {shop.address}</Text>
+                    )}
+                    <Text style={styles.shopDistance}>🚗 {shop.distance}</Text>
                   </View>
                 </TouchableOpacity>
               ))}
@@ -461,13 +501,12 @@ export default function HomeScreen() {
                 <View style={styles.selectedShopInfo}>
                   <Text style={styles.selectedShopLabel}>Selected Shop</Text>
                   <Text style={styles.selectedShopName}>{selectedShop.name}</Text>
-                  {selectedShop.vendor?.ownerName && (
-                    <Text style={styles.selectedShopOwner}>Owner: {selectedShop.vendor.ownerName}</Text>
+                  {selectedShop.vendor?.shopType && (
+                    <Text style={styles.selectedShopType}>
+                      🏪 {selectedShop.vendor.shopType.charAt(0).toUpperCase() + selectedShop.vendor.shopType.slice(1)} Shop
+                    </Text>
                   )}
                   <Text style={styles.selectedShopDetails}>{selectedShop.address} • {selectedShop.distance}</Text>
-                  {selectedShop.vendor?.mobileNumber && (
-                    <Text style={styles.selectedShopContact}>📞 {selectedShop.vendor.mobileNumber}</Text>
-                  )}
                 </View>
                 <TouchableOpacity style={styles.changeShopButton} onPress={handleChangeShop}>
                   <Text style={styles.changeShopText}>Change</Text>
@@ -502,7 +541,12 @@ export default function HomeScreen() {
               contentContainerStyle={styles.categoryContainer}
               bounces={false}
             >
-              {categories.map((category) => (
+              {(() => {
+                // Get available categories based on shop type
+                const shopType = selectedShop?.vendor?.shopType;
+                const availableCategories = getAvailableCategories(shopType);
+                
+                return availableCategories.map((category) => (
                 <TouchableOpacity
                   key={category}
                   style={[
@@ -521,7 +565,8 @@ export default function HomeScreen() {
                     {category}
                   </Text>
                 </TouchableOpacity>
-              ))}
+                ));
+              })()}
             </ScrollView>
 
             <View style={styles.section}>
@@ -529,7 +574,7 @@ export default function HomeScreen() {
                 <Text style={styles.sectionTitle}>Best Recommended</Text>
               </View>
 
-              {isLoadingProducts ? (
+              {isLoadingAllProducts ? (
                 <View style={styles.emptyContainer}>
                   <ActivityIndicator size="small" color="#DC2626" />
                   <Text style={styles.emptyText}>Loading products...</Text>
@@ -932,6 +977,12 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     fontWeight: '500',
   },
+  shopAddress: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 6,
+    marginTop: 2,
+  },
   shopDistance: {
     fontSize: 13,
     color: '#DC2626',
@@ -975,18 +1026,13 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     marginTop: 4,
   },
-  selectedShopOwner: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  selectedShopDetails: {
+  selectedShopType: {
     fontSize: 12,
     color: '#6B7280',
     marginTop: 4,
+    fontWeight: '500',
   },
-  selectedShopContact: {
+  selectedShopDetails: {
     fontSize: 12,
     color: '#6B7280',
     marginTop: 4,

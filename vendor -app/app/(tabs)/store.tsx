@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import {
   View,
   Text,
@@ -31,7 +31,181 @@ interface ProductState {
   is_available: boolean;
   price_per_kg: number;
   image_url: string;
+  weight?: string | null;
+  weight_in_kg?: number;
+  description?: string;
+  price?: number;
+  original_price?: number | null;
+  discount_percentage?: number;
 }
+
+// Memoized Product Card Component to prevent re-renders and keyboard dismissal
+const ProductCard = memo(({ 
+  product, 
+  initialPrice, 
+  onPriceChange, 
+  onToggleAvailability 
+}: {
+  product: ProductState;
+  initialPrice: string;
+  onPriceChange: (productId: string, text: string) => void;
+  onToggleAvailability: (productId: string) => void;
+}) => {
+  // Use local state for the input value to prevent re-renders from parent
+  const [localPrice, setLocalPrice] = useState(initialPrice);
+  const [isFocused, setIsFocused] = useState(false);
+  const inputRef = useRef<any>(null);
+
+  // Update local state when initialPrice changes from outside (but not while focused)
+  useEffect(() => {
+    if (!isFocused && initialPrice !== localPrice) {
+      setLocalPrice(initialPrice);
+    }
+  }, [initialPrice]);
+
+  const handlePriceChange = (text: string) => {
+    // Remove leading zeros and allow empty string or numeric only
+    let cleanedValue = text;
+    
+    // Remove leading zeros (but keep single zero or decimal point)
+    if (cleanedValue.length > 1 && cleanedValue.startsWith('0') && !cleanedValue.startsWith('0.')) {
+      cleanedValue = cleanedValue.replace(/^0+/, '') || '0';
+    }
+    
+    // Allow empty string or numeric only (including decimals)
+    if (cleanedValue === '' || /^\d*\.?\d*$/.test(cleanedValue)) {
+      setLocalPrice(cleanedValue);
+      // Debounce the parent update to prevent re-renders
+      onPriceChange(product.id, cleanedValue);
+    }
+  };
+
+  const handleFocus = () => {
+    setIsFocused(true);
+    // Ensure keyboard stays open
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  };
+
+  const handleBlur = () => {
+    setIsFocused(false);
+  };
+
+  return (
+    <View style={styles.productCard}>
+      {/* Product Image */}
+      <Image
+        source={getImageSource(product.image_url, product.name, product.category)}
+        style={styles.productImage}
+        resizeMode="cover"
+        defaultSource={require('../../assets/images/taaza.png')}
+        onError={() => {
+          if (__DEV__) {
+            console.warn('[StoreScreen] Image failed to load:', product.name, product.image_url);
+          }
+        }}
+      />
+      
+      {/* Product Info Section */}
+      <View style={styles.productContent}>
+        {/* Product Name and Availability Badge */}
+        <View style={styles.productHeader}>
+          <Text style={styles.productName}>{product.name}</Text>
+          {product.is_available && (
+            <View style={styles.availableBadgeContainer}>
+              <Text style={styles.availableBadge}>Available</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Product Details - Weight, Description */}
+        {(product.weight || product.description) && (
+          <View style={styles.productDetailsSection}>
+            {product.weight && (
+              <Text style={styles.productDetailText}>
+                📦 Weight: {product.weight}
+              </Text>
+            )}
+            {product.description && (
+              <Text style={styles.productDetailText} numberOfLines={2}>
+                📝 {product.description}
+              </Text>
+            )}
+            {product.price && product.price > 0 && (
+              <Text style={styles.productDetailText}>
+                💰 Current Price: ₹{product.price.toFixed(2)}
+              </Text>
+            )}
+            {product.original_price && product.original_price > product.price! && (
+              <View style={styles.discountInfo}>
+                <Text style={styles.originalPriceText}>
+                  ₹{product.original_price.toFixed(2)}
+                </Text>
+                {product.discount_percentage > 0 && (
+                  <Text style={styles.discountText}>
+                    {product.discount_percentage}% OFF
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Price Input */}
+        <View style={styles.priceSection}>
+          <Text style={styles.priceLabel}>Price per kg:</Text>
+          <View style={[styles.rateInputContainer, isFocused && styles.rateInputFocused]}>
+            <Text style={styles.currencySymbol}>₹</Text>
+            <TextInput
+              ref={inputRef}
+              style={styles.rateInput}
+              keyboardType="decimal-pad"
+              value={localPrice}
+              onChangeText={handlePriceChange}
+              placeholder="Enter price"
+              maxLength={10}
+              onFocus={handleFocus}
+              onBlur={handleBlur}
+              selectionColor="#111"
+              returnKeyType="done"
+              blurOnSubmit={false}
+              editable={true}
+              importantForAutofill="no"
+              autoCorrect={false}
+              autoCapitalize="none"
+              keyboardAppearance="default"
+              showSoftInputOnFocus={true}
+            />
+          </View>
+        </View>
+
+        {/* Availability Toggle */}
+        <View style={styles.availabilitySection}>
+          <Text style={styles.availabilityLabel}>
+            {product.is_available ? 'Available' : 'Not Available'}
+          </Text>
+          <Switch
+            value={product.is_available}
+            onValueChange={() => onToggleAvailability(product.id)}
+            thumbColor={product.is_available ? '#111111' : '#f4f3f4'}
+            trackColor={{ false: '#767577', true: '#4CAF50' }}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}, (prevProps, nextProps) => {
+  // Only re-render if product availability changes or initial price changes (but not while typing)
+  // This prevents re-renders when user is typing
+  return (
+    prevProps.product.id === nextProps.product.id &&
+    prevProps.product.is_available === nextProps.product.is_available &&
+    prevProps.initialPrice === nextProps.initialPrice
+  );
+});
+
+ProductCard.displayName = 'ProductCard';
 
 export default function StoreScreen() {
   const [products, setProducts] = useState<ProductState[]>([]);
@@ -40,6 +214,7 @@ export default function StoreScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [shopId, setShopId] = useState<string | null>(null);
+  const inputRefs = useRef<Record<string, any>>({});
 
   // Load products from Supabase on mount
   useEffect(() => {
@@ -65,23 +240,29 @@ export default function StoreScreen() {
           id: product.id,
           name: product.name,
           category: product.category,
-          // If product has shop_id matching vendor, use its is_available status
-          // Otherwise, start as not available
-          is_available: product.shop_id === vendorShopId ? (product.is_available || false) : false,
-          // Start with 0 price - vendor will set their own price
+          // Always start as available (ON) by default
+          // If product already has shop_id matching vendor, use its existing status
+          // Otherwise, default to available (true)
+          is_available: product.shop_id === vendorShopId ? (product.is_available !== undefined ? product.is_available : true) : true,
+          // Use existing price if product belongs to this vendor's shop, otherwise start with 0
           price_per_kg: product.shop_id === vendorShopId ? (product.price_per_kg || 0) : 0,
           image_url: product.image_url,
+          weight: product.weight || null,
+          weight_in_kg: product.weight_in_kg || 1,
+          description: product.description || '',
+          price: product.price || 0,
+          original_price: product.original_price || null,
+          discount_percentage: product.discount_percentage || 0,
         }));
 
         // Initialize prices - start with empty/0 for all products
         // Vendors will set their own prices
         const initialPrices: Record<string, string> = {};
         productStates.forEach((product) => {
-          // Only use existing price if it belongs to this vendor's shop
-          // Otherwise start with empty/0
+          // Use existing price if product already has a price set
           let priceValue = '';
-          if (product.shop_id === vendorShopId && product.price_per_kg && product.price_per_kg > 0) {
-            // Use existing price for this vendor's shop
+          if (product.price_per_kg && product.price_per_kg > 0) {
+            // Use existing price
             priceValue = product.price_per_kg.toString().replace(/\.?0+$/, '');
             if (priceValue.includes('.') && priceValue.endsWith('.')) {
               priceValue = priceValue.slice(0, -1);
@@ -124,7 +305,7 @@ export default function StoreScreen() {
     );
   };
 
-  const updatePrice = (productId: string, value: string) => {
+  const updatePrice = useCallback((productId: string, value: string) => {
     // Remove leading zeros and allow empty string or numeric only
     let cleanedValue = value;
     
@@ -135,12 +316,13 @@ export default function StoreScreen() {
     
     // Allow empty string or numeric only (including decimals)
     if (cleanedValue === '' || /^\d*\.?\d*$/.test(cleanedValue)) {
+      // Update state immediately without checking to prevent focus loss
       setPrices((prev) => ({
         ...prev,
         [productId]: cleanedValue,
       }));
     }
-  };
+  }, []);
 
   const handleSave = async () => {
     if (!shopId) {
@@ -220,19 +402,22 @@ export default function StoreScreen() {
     }
   };
 
-  // Group products by category
-  const productsByCategory = products.reduce((acc, product) => {
-    if (!acc[product.category]) {
-      acc[product.category] = [];
-    }
-    acc[product.category].push(product);
-    return acc;
-  }, {} as Record<string, ProductState[]>);
+  // Group products by category - memoized to prevent unnecessary re-renders
+  const productsByCategory = useMemo(() => {
+    return products.reduce((acc, product) => {
+      if (!acc[product.category]) {
+        acc[product.category] = [];
+      }
+      acc[product.category].push(product);
+      return acc;
+    }, {} as Record<string, ProductState[]>);
+  }, [products]);
 
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         style={{ flex: 1 }}
       >
         <View style={styles.header}>
@@ -257,7 +442,12 @@ export default function StoreScreen() {
             <Text style={styles.loadingText}>Loading products...</Text>
           </View>
         ) : (
-          <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <ScrollView 
+            style={styles.content} 
+            showsVerticalScrollIndicator={false} 
+            keyboardShouldPersistTaps="always"
+            keyboardDismissMode="none"
+          >
             {Object.keys(productsByCategory).length === 0 ? (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyText}>No products found</Text>
@@ -277,78 +467,14 @@ export default function StoreScreen() {
                   <View key={category} style={styles.categorySection}>
                     <Text style={styles.categoryTitle}>{category}</Text>
                     {categoryProducts.map((product) => {
-                      const isFocused = focusedInput === product.id;
                       return (
-                        <View key={product.id} style={styles.productCard}>
-                          {/* Product Image */}
-                          <Image
-                            source={getImageSource(product.image_url, product.name, product.category)}
-                            style={styles.productImage}
-                            resizeMode="cover"
-                            defaultSource={require('../../assets/images/taaza.png')}
-                            onError={() => {
-                              // Image failed to load, will use defaultSource
-                              if (__DEV__) {
-                                console.warn('[StoreScreen] Image failed to load:', product.name, product.image_url);
-                              }
-                            }}
-                          />
-                          
-                          {/* Product Info Section */}
-                          <View style={styles.productContent}>
-                            {/* Product Name and Availability Badge */}
-                            <View style={styles.productHeader}>
-                              <Text style={styles.productName}>{product.name}</Text>
-                              {product.is_available && (
-                                <View style={styles.availableBadgeContainer}>
-                                  <Text style={styles.availableBadge}>Available</Text>
-                                </View>
-                              )}
-                            </View>
-
-                            {/* Price Input */}
-                            <View style={styles.priceSection}>
-                              <Text style={styles.priceLabel}>Price per kg:</Text>
-                              <View style={[styles.rateInputContainer, isFocused && styles.rateInputFocused]}>
-                                <Text style={styles.currencySymbol}>₹</Text>
-                                <TextInput
-                                  style={styles.rateInput}
-                                  keyboardType="decimal-pad"
-                                  value={prices[product.id] || ''}
-                                  onChangeText={(text) => updatePrice(product.id, text)}
-                                  placeholder="Enter price"
-                                  maxLength={10}
-                                  onFocus={() => setFocusedInput(product.id)}
-                                  onBlur={() => {
-                                    setFocusedInput(null);
-                                    // Validate price on blur - if empty and product is available, show warning
-                                    const currentPrice = prices[product.id];
-                                    if (product.is_available && (!currentPrice || parseFloat(currentPrice || '0') <= 0)) {
-                                      // Don't auto-fill, let user enter price
-                                    }
-                                  }}
-                                  selectionColor="#111"
-                                  returnKeyType="done"
-                                  blurOnSubmit={true}
-                                  importantForAutofill="no"
-                                />
-                              </View>
-                            </View>
-
-                            {/* Availability Toggle */}
-                            <View style={styles.availabilitySection}>
-                              <Text style={styles.availabilityLabel}>
-                                {product.is_available ? 'Available' : 'Not Available'}
-                              </Text>
-                              <Switch
-                                value={product.is_available}
-                                onValueChange={() => toggleProductAvailability(product.id)}
-                                thumbColor={product.is_available ? '#111111' : '#f4f3f4'}
-                                trackColor={{ false: '#767577', true: '#4CAF50' }}
-                              />
-                            </View>
-                          </View>
-                        </View>
+                        <ProductCard
+                          key={product.id}
+                          product={product}
+                          initialPrice={prices[product.id] || ''}
+                          onPriceChange={updatePrice}
+                          onToggleAvailability={toggleProductAvailability}
+                        />
                       );
                     })}
                   </View>
@@ -619,5 +745,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#374151',
     fontWeight: '500',
+  },
+  productDetailsSection: {
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  productDetailText: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 4,
+    lineHeight: 16,
+  },
+  discountInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  originalPriceText: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textDecorationLine: 'line-through',
+    marginRight: 8,
+  },
+  discountText: {
+    fontSize: 11,
+    color: '#EF4444',
+    fontWeight: '600',
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
 });

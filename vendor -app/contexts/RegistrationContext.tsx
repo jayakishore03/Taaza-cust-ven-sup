@@ -50,6 +50,7 @@ interface RegistrationData {
     bankBranch?: string;
     accountHolderName?: string;
     accountType?: string;
+    upiId?: string;
   };
   
   // Step 6

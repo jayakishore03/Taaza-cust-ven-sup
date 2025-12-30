@@ -67,6 +67,7 @@ export function dbProductToAppProduct(dbProduct: ProductFromDB): Product {
 
 /**
  * Get all products
+ * Only returns products where vendor has set a price (price_per_kg > 0)
  */
 export async function getAllProducts(): Promise<Product[]> {
   try {
@@ -74,6 +75,8 @@ export async function getAllProducts(): Promise<Product[]> {
       .from('products')
       .select('*')
       .eq('is_available', true)
+      .not('shop_id', 'is', null) // Only show products that belong to a vendor
+      .gt('price_per_kg', 0) // Only show products where vendor has set a price
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -87,8 +90,14 @@ export async function getAllProducts(): Promise<Product[]> {
       throw error;
     }
 
-    console.log(`[Products] Found ${data?.length || 0} total available products`);
-    return (data || []).map(dbProductToAppProduct);
+    // Filter products to ensure they have shop_id and price_per_kg > 0
+    const filteredData = (data || []).filter((p: any) => {
+      return p.shop_id !== null && p.shop_id !== undefined && 
+             typeof p.price_per_kg === 'number' && p.price_per_kg > 0;
+    });
+    
+    console.log(`[Products] Found ${filteredData.length} total available products with vendor-set prices (filtered from ${data?.length || 0})`);
+    return filteredData.map(dbProductToAppProduct);
   } catch (error: any) {
     console.error('[Products] Exception in getAllProducts:', error);
     return [];
@@ -98,6 +107,8 @@ export async function getAllProducts(): Promise<Product[]> {
 /**
  * Get products by category
  * Optionally filter by shop_id to show only products from a specific shop
+ * Only returns products where vendor has set a price (price_per_kg > 0) if shopId is provided
+ * If shopId is not provided, shows all products in the category (even without prices)
  */
 export async function getProductsByCategory(
   category: string, 
@@ -117,12 +128,18 @@ export async function getProductsByCategory(
       .eq('category', category)
       .eq('is_available', true);
 
-    // Filter by shop_id if provided
+    // If shopId is provided, filter by shop_id and require price
     if (shopId) {
       console.log('[Products] Filtering by shop_id:', shopId);
-      query = query.eq('shop_id', shopId);
+      query = query
+        .eq('shop_id', shopId)
+        .not('shop_id', 'is', null)
+        .gt('price_per_kg', 0); // Only show products where vendor has set a price
     } else {
+      // If no shopId, show all products in category (for shop type matching)
+      // Still prefer products with prices, but include all available products
       console.log('[Products] No shop_id filter - showing all available products in category');
+      // Don't require shop_id or price_per_kg > 0 when filtering by shop type
     }
 
     const { data, error } = await query.order('created_at', { ascending: false });
@@ -144,13 +161,20 @@ export async function getProductsByCategory(
           .select('*')
           .eq('category', category)
           .eq('is_available', true)
+          .not('shop_id', 'is', null) // Only show products that belong to a vendor
+          .gt('price_per_kg', 0) // Still filter for products with prices
           .order('created_at', { ascending: false });
         
         const { data: fallbackData, error: fallbackError } = await fallbackQuery;
         if (fallbackError) {
           throw fallbackError;
         }
-        return (fallbackData || []).map(dbProductToAppProduct);
+        // Filter fallback data to ensure they have shop_id and price_per_kg > 0
+        const filteredFallback = (fallbackData || []).filter((p: any) => {
+          return p.shop_id !== null && p.shop_id !== undefined && 
+                 typeof p.price_per_kg === 'number' && p.price_per_kg > 0;
+        });
+        return filteredFallback.map(dbProductToAppProduct);
       }
       
       throw error;
@@ -158,40 +182,98 @@ export async function getProductsByCategory(
 
     console.log(`[Products] Found ${data?.length || 0} products for category: ${category}, shopId: ${shopId || 'all'}`);
     
-    if (data && data.length > 0) {
+    // Filter products based on whether shopId was provided
+    let filteredData = data || [];
+    
+    if (shopId) {
+      // When filtering by shop_id, ensure products have shop_id and price_per_kg > 0
+      filteredData = filteredData.filter((p: any) => {
+        const hasShopId = p.shop_id !== null && p.shop_id !== undefined;
+        const hasValidPrice = typeof p.price_per_kg === 'number' && p.price_per_kg > 0;
+        
+        if (!hasShopId || !hasValidPrice) {
+          console.log(`[Products] Filtering out product "${p.name}": shop_id=${p.shop_id}, price_per_kg=${p.price_per_kg}`);
+        }
+        
+        return hasShopId && hasValidPrice;
+      });
+      
+      if (filteredData.length !== (data?.length || 0)) {
+        console.warn(`[Products] Filtered out ${(data?.length || 0) - filteredData.length} products without vendor-set prices. Showing ${filteredData.length} products.`);
+      }
+    } else {
+      // When filtering by shop type (no shopId), show all available products in the category
+      // Don't filter by shop_id or price - show all products that match the category
+      console.log(`[Products] Showing all ${filteredData.length} products in category "${category}" (shop type filtering)`);
+    }
+    
+    if (shopId && filteredData.length === 0 && data && data.length > 0) {
+      console.warn(`[Products] No products found for shop_id "${shopId}". Products exist but belong to different shops or have no prices set.`);
+      // Log all products found (regardless of shop_id) for debugging
+      data.forEach((p: any) => {
+        console.log(`[Products] Available product: "${p.name}" - shop_id: ${p.shop_id}, price_per_kg: ${p.price_per_kg}, category: ${p.category}`);
+      });
+    }
+    
+    if (filteredData && filteredData.length > 0) {
       console.log('[Products] Sample product:', {
-        id: data[0].id,
-        name: data[0].name,
-        shop_id: data[0].shop_id,
-        is_available: data[0].is_available,
-        category: data[0].category,
-        price_per_kg: data[0].price_per_kg,
-        price: data[0].price,
+        id: filteredData[0].id,
+        name: filteredData[0].name,
+        shop_id: filteredData[0].shop_id,
+        is_available: filteredData[0].is_available,
+        category: filteredData[0].category,
+        price_per_kg: filteredData[0].price_per_kg,
+        price: filteredData[0].price,
       });
       
       // Log all products with their prices for debugging
       if (__DEV__) {
-        data.forEach((p: any) => {
-          console.log(`[Products] Product: ${p.name} - Price: ₹${p.price} (₹${p.price_per_kg}/kg)`);
+        filteredData.forEach((p: any) => {
+          console.log(`[Products] Product: ${p.name} - Price: ₹${p.price} (₹${p.price_per_kg}/kg) - Shop: ${p.shop_id}`);
         });
       }
     } else if (shopId) {
-      // If no products found with shop_id, try without shop filter to see if products exist
-      console.warn('[Products] No products found with shop_id filter. Checking products without shop filter...');
-      const allCategoryProducts = await supabase
+      // If no products found with shop_id, check what products exist in this category (for debugging)
+      console.warn(`[Products] No products found for shop_id "${shopId}" in category "${category}". Checking products in database...`);
+      
+      // Check ALL products in this category (even without shop_id or prices)
+      const allCategoryProductsCheck = await supabase
         .from('products')
-        .select('*')
+        .select('id, name, category, shop_id, price_per_kg, is_available')
         .eq('category', category)
-        .eq('is_available', true)
         .order('created_at', { ascending: false });
       
-      if (allCategoryProducts.data && allCategoryProducts.data.length > 0) {
-        console.log(`[Products] Found ${allCategoryProducts.data.length} products in category without shop filter`);
-        console.log('[Products] Sample products shop_ids:', allCategoryProducts.data.slice(0, 3).map(p => ({ name: p.name, shop_id: p.shop_id })));
+      if (allCategoryProductsCheck.data && allCategoryProductsCheck.data.length > 0) {
+        console.log(`[Products] Found ${allCategoryProductsCheck.data.length} total products in category "${category}" in database`);
+        const withShopAndPrice = allCategoryProductsCheck.data.filter(p => p.shop_id && p.price_per_kg > 0);
+        const withShopNoPrice = allCategoryProductsCheck.data.filter(p => p.shop_id && (!p.price_per_kg || p.price_per_kg <= 0));
+        const noShop = allCategoryProductsCheck.data.filter(p => !p.shop_id);
+        
+        console.log(`[Products] - Products with shop_id and price: ${withShopAndPrice.length}`);
+        console.log(`[Products] - Products with shop_id but no price: ${withShopNoPrice.length}`);
+        console.log(`[Products] - Products without shop_id: ${noShop.length}`);
+        
+        if (withShopAndPrice.length > 0) {
+          const shopIds = [...new Set(withShopAndPrice.map(p => p.shop_id))];
+          console.log(`[Products] Shops with priced products in this category: ${shopIds.join(', ')}`);
+        }
+        
+        // Check specifically for this shop_id
+        const thisShopProducts = allCategoryProductsCheck.data.filter(p => p.shop_id === shopId);
+        if (thisShopProducts.length > 0) {
+          console.log(`[Products] Found ${thisShopProducts.length} products for shop_id "${shopId}" but they don't have prices set.`);
+          thisShopProducts.forEach(p => {
+            console.log(`[Products]   - "${p.name}": price_per_kg=${p.price_per_kg}, is_available=${p.is_available}`);
+          });
+        } else {
+          console.log(`[Products] No products found with shop_id "${shopId}" in category "${category}". Vendor needs to set prices in vendor app.`);
+        }
+      } else {
+        console.warn(`[Products] No products found in category "${category}" in database at all.`);
       }
     }
 
-    return (data || []).map(dbProductToAppProduct);
+    return filteredData.map(dbProductToAppProduct);
   } catch (error: any) {
     console.error('[Products] Exception in getProductsByCategory:', error);
     // Return empty array instead of throwing to prevent app crash
@@ -201,6 +283,7 @@ export async function getProductsByCategory(
 
 /**
  * Get product by ID
+ * Only returns product if vendor has set a price (price_per_kg > 0)
  */
 export async function getProductById(id: string): Promise<Product | null> {
   const { data, error } = await supabase
@@ -208,6 +291,8 @@ export async function getProductById(id: string): Promise<Product | null> {
     .select('*')
     .eq('id', id)
     .eq('is_available', true)
+    .not('shop_id', 'is', null) // Only show products that belong to a vendor
+    .gt('price_per_kg', 0) // Only show products where vendor has set a price
     .single();
 
   if (error) {
@@ -218,11 +303,17 @@ export async function getProductById(id: string): Promise<Product | null> {
     throw error;
   }
 
-  return data ? dbProductToAppProduct(data) : null;
+  // Ensure product has shop_id and price_per_kg > 0 before returning
+  if (data && data.shop_id !== null && data.shop_id !== undefined && 
+      typeof data.price_per_kg === 'number' && data.price_per_kg > 0) {
+    return dbProductToAppProduct(data);
+  }
+  return null;
 }
 
 /**
  * Get products by shop ID
+ * Only returns products where vendor has set a price (price_per_kg > 0)
  */
 export async function getProductsByShop(shopId: string): Promise<Product[]> {
   const { data, error } = await supabase
@@ -230,6 +321,7 @@ export async function getProductsByShop(shopId: string): Promise<Product[]> {
     .select('*')
     .eq('shop_id', shopId)
     .eq('is_available', true)
+    .gt('price_per_kg', 0) // Only show products where vendor has set a price
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -237,17 +329,26 @@ export async function getProductsByShop(shopId: string): Promise<Product[]> {
     throw error;
   }
 
-  return (data || []).map(dbProductToAppProduct);
+  // Filter products to ensure they have shop_id and price_per_kg > 0
+  const filteredData = (data || []).filter((p: any) => {
+    return p.shop_id !== null && p.shop_id !== undefined && 
+           typeof p.price_per_kg === 'number' && p.price_per_kg > 0;
+  });
+  
+  return filteredData.map(dbProductToAppProduct);
 }
 
 /**
  * Search products by name
+ * Only returns products where vendor has set a price (price_per_kg > 0)
  */
 export async function searchProducts(query: string): Promise<Product[]> {
   const { data, error } = await supabase
     .from('products')
     .select('*')
     .eq('is_available', true)
+    .not('shop_id', 'is', null) // Only show products that belong to a vendor
+    .gt('price_per_kg', 0) // Only show products where vendor has set a price
     .ilike('name', `%${query}%`)
     .order('created_at', { ascending: false });
 
@@ -256,6 +357,12 @@ export async function searchProducts(query: string): Promise<Product[]> {
     throw error;
   }
 
-  return (data || []).map(dbProductToAppProduct);
+  // Filter products to ensure they have shop_id and price_per_kg > 0
+  const filteredData = (data || []).filter((p: any) => {
+    return p.shop_id !== null && p.shop_id !== undefined && 
+           typeof p.price_per_kg === 'number' && p.price_per_kg > 0;
+  });
+  
+  return filteredData.map(dbProductToAppProduct);
 }
 

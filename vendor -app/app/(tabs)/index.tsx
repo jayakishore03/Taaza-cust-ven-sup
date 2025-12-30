@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,13 @@ import {
   StatusBar,
   ActivityIndicator,
   Switch,
+  RefreshControl,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, Href } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '@/contexts/AuthContext';
-import { getDashboardStats, DashboardStats } from '@/services/api';
+import { getDashboardStats, DashboardStats, getVendorOrders, Order } from '@/services/api';
 
 import {
   LogOut,
@@ -23,10 +25,11 @@ import {
   TrendingUp,
   DollarSign,
   Package,
-  Users,
   MapPin,
   FileText,
   CreditCard,
+  Clock,
+  ArrowRight,
 } from 'lucide-react-native';
 
 const STATUS_BAR_HEIGHT = Platform.OS === 'android' ? StatusBar.currentHeight || 24 : 44;
@@ -36,16 +39,72 @@ export default function DashboardScreen() {
   const [stats, setStats] = useState<DashboardStats>({
     totalOrders: 0,
     monthlyRevenue: 0,
-    activeCustomers: 0,
     pendingOrders: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [newOrders, setNewOrders] = useState<Order[]>([]);
   const [shopName, setShopName] = useState<string | undefined>(undefined);
   const [isOpen, setIsOpen] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastOrderCheckRef = useRef<Date>(new Date());
 
   useEffect(() => {
     loadDashboardData();
+    loadNewOrders();
+    
+    // Start polling for new orders every 10 seconds
+    startPolling();
+    
+    // Cleanup polling on unmount
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
   }, []);
+
+  // Refresh orders when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      // Refresh immediately when screen comes into focus
+      loadNewOrders();
+      loadDashboardData();
+      
+      // Restart polling
+      startPolling();
+      
+      return () => {
+        // Cleanup polling when screen loses focus
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+        }
+      };
+    }, [])
+  );
+
+  const startPolling = () => {
+    // Clear existing interval if any
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+    }
+    
+    // Poll every 5 seconds for new orders (real-time updates)
+    pollingIntervalRef.current = setInterval(() => {
+      loadNewOrders(true); // Pass true to indicate it's a background poll
+    }, 5000); // 5 seconds for faster updates
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([
+      loadDashboardData(),
+      loadNewOrders(),
+    ]);
+    setRefreshing(false);
+  };
 
   // Load cached vendor/shop name for header
   useEffect(() => {
@@ -111,6 +170,132 @@ export default function DashboardScreen() {
     }
   };
 
+  const loadNewOrders = async (isBackgroundPoll = false) => {
+    try {
+      // Only show loading indicator if it's a manual refresh, not background polling
+      if (!isBackgroundPoll) {
+        setOrdersLoading(true);
+      }
+      
+      const orders = await getVendorOrders();
+      
+      console.log(`[loadNewOrders] Fetched ${orders?.length || 0} orders from API`);
+      
+      // If no orders returned, set empty array and return early
+      if (!orders || orders.length === 0) {
+        console.log('[loadNewOrders] No orders returned from API');
+        setNewOrders([]);
+        if (!isBackgroundPoll) {
+          setOrdersLoading(false);
+        }
+        return;
+      }
+      
+      // Filter new orders - orders with status "Preparing" or "Pending" or "Confirmed"
+      // and created within last 24 hours, sorted by newest first
+      const now = new Date();
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      
+      const recentOrders = orders
+        .filter(order => {
+          // Use created_at if available, otherwise use placedOn (backend format)
+          const orderDateStr = order.created_at || order.placedOn;
+          if (!orderDateStr) {
+            console.log(`[loadNewOrders] Order ${order.id || order.order_number} has no date`);
+            return false;
+          }
+          
+          // Handle formatted date strings from backend
+          try {
+            const orderDate = new Date(orderDateStr);
+            if (isNaN(orderDate.getTime())) {
+              console.log(`[loadNewOrders] Order ${order.id || order.order_number} has invalid date: ${orderDateStr}`);
+              return false; // Invalid date
+            }
+            
+            const status = order.status?.toLowerCase() || '';
+            const isRecent = orderDate >= oneDayAgo;
+            const isActiveStatus = status.includes('preparing') || status.includes('pending') || status.includes('confirmed');
+            
+            if (!isRecent) {
+              console.log(`[loadNewOrders] Order ${order.id || order.order_number} is too old: ${orderDateStr}`);
+            }
+            if (!isActiveStatus) {
+              console.log(`[loadNewOrders] Order ${order.id || order.order_number} has inactive status: ${status}`);
+            }
+            
+            return isRecent && isActiveStatus;
+          } catch (error) {
+            console.log(`[loadNewOrders] Error parsing date for order ${order.id || order.order_number}:`, error);
+            return false; // Invalid date format
+          }
+        })
+        .sort((a, b) => {
+          try {
+            const dateA = new Date(a.created_at || a.placedOn || 0).getTime();
+            const dateB = new Date(b.created_at || b.placedOn || 0).getTime();
+            return dateB - dateA;
+          } catch {
+            return 0; // If date parsing fails, maintain order
+          }
+        })
+        .slice(0, 5); // Show max 5 most recent orders
+      
+      console.log(`[loadNewOrders] Filtered to ${recentOrders.length} recent active orders`);
+      
+      // Check if we have new orders (compare with previous state)
+      const hasNewOrders = recentOrders.length > 0 && 
+        (newOrders.length === 0 || 
+         recentOrders[0]?.id !== newOrders[0]?.id ||
+         recentOrders.length !== newOrders.length);
+      
+      setNewOrders(recentOrders);
+      
+      // Update last check time
+      lastOrderCheckRef.current = new Date();
+      
+    } catch (error) {
+      // Silently handle errors - set empty array
+      setNewOrders([]);
+    } finally {
+      if (!isBackgroundPoll) {
+        setOrdersLoading(false);
+      }
+    }
+  };
+
+  const formatTimeAgo = (dateString: string): string => {
+    const now = new Date();
+    const date = new Date(dateString);
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (diffInSeconds < 60) {
+      return 'Just now';
+    } else if (diffInSeconds < 3600) {
+      const minutes = Math.floor(diffInSeconds / 60);
+      return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
+    } else if (diffInSeconds < 86400) {
+      const hours = Math.floor(diffInSeconds / 3600);
+      return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+    } else {
+      const days = Math.floor(diffInSeconds / 86400);
+      return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+    }
+  };
+
+  const getStatusColor = (status: string | undefined): string => {
+    const statusLower = (status || '').toLowerCase();
+    if (statusLower.includes('preparing') || statusLower.includes('pending')) {
+      return '#FFF3CD';
+    } else if (statusLower.includes('confirmed')) {
+      return '#D1ECF1';
+    } else if (statusLower.includes('completed') || statusLower.includes('delivered')) {
+      return '#D4EDDA';
+    } else {
+      return '#E5E7EB';
+    }
+  };
+
   const handleLogout = () => {
     Alert.alert('Logout', 'Are you sure you want to logout?', [
       { text: 'Cancel', style: 'cancel' },
@@ -163,7 +348,18 @@ export default function DashboardScreen() {
       </View>
 
       {/* Content */}
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#000"
+            colors={['#000']}
+          />
+        }
+      >
         {/* Business Overview */}
         <View style={styles.statsContainer}>
           <Text style={styles.sectionTitle}>Business Overview</Text>
@@ -193,17 +389,87 @@ export default function DashboardScreen() {
             </View>
 
             <View style={styles.statCard}>
-              <Users size={24} color="#000" />
-              <Text style={styles.statValue}>{stats.activeCustomers}</Text>
-              <Text style={styles.statLabel}>Active Customers</Text>
-            </View>
-
-            <View style={styles.statCard}>
               <Package size={24} color="#000" />
               <Text style={styles.statValue}>{stats.pendingOrders}</Text>
               <Text style={styles.statLabel}>Pending Orders</Text>
             </View>
           </View>
+          )}
+        </View>
+
+        {/* New Order Received */}
+        <View style={styles.newOrdersSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>New Order Received</Text>
+            {newOrders.length > 0 && (
+              <TouchableOpacity
+                onPress={() => {
+                  // Navigate to orders list if exists
+                  router.push('/(tabs)/index' as Href);
+                }}
+              >
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {ordersLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color="#000" />
+            </View>
+          ) : newOrders.length === 0 ? (
+            <View style={styles.emptyOrdersContainer}>
+              <Package size={32} color="#999" />
+              <Text style={styles.emptyOrdersText}>No new orders</Text>
+              <Text style={styles.emptyOrdersSubtext}>
+                New orders from customers will appear here
+              </Text>
+            </View>
+          ) : (
+            newOrders.map((order) => (
+              <TouchableOpacity
+                key={order.id}
+                style={styles.orderCard}
+                onPress={() => {
+                  // Navigate to order details if route exists
+                  // router.push(`/orders/${order.id}` as Href);
+                }}
+              >
+                <View style={styles.orderCardLeft}>
+                  <View style={styles.orderIconContainer}>
+                    <Package size={20} color="#000" />
+                  </View>
+                  <View style={styles.orderInfo}>
+                    <Text style={styles.orderNumber}>
+                      {order.orderNumber || `Order #${order.id.slice(0, 8)}`}
+                    </Text>
+                    <Text style={styles.orderTotal}>
+                      {order.total || 
+                        (order.total_amount 
+                          ? `₹${order.total_amount.toFixed(2)}` 
+                          : '₹0.00')}
+                    </Text>
+                    <View style={styles.orderMeta}>
+                      <Clock size={12} color="#666" />
+                    <Text style={styles.orderTime}>
+                      {formatTimeAgo(order.created_at || order.placedOn || new Date().toISOString())}
+                    </Text>
+                    </View>
+                  </View>
+                </View>
+                <View style={styles.orderCardRight}>
+                  <View style={[
+                    styles.statusBadge,
+                    { backgroundColor: getStatusColor(order.status) }
+                  ]}>
+                    <Text style={styles.statusText}>
+                      {order.status || 'Preparing'}
+                    </Text>
+                  </View>
+                  <ArrowRight size={20} color="#999" />
+                </View>
+              </TouchableOpacity>
+            ))
           )}
         </View>
 
@@ -213,26 +479,13 @@ export default function DashboardScreen() {
 
           <TouchableOpacity
             style={styles.actionCard}
-            onPress={() => router.push('/store' as Href)}
-          >
-            <MapPin size={24} color="#000" />
-            <View style={styles.actionContent}>
-              <Text style={styles.actionTitle}>Update Store Details</Text>
-              <Text style={styles.actionSubtitle}>
-                Manage your store information and location
-              </Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionCard}
             onPress={() => router.push('/documents' as Href)}
           >
             <FileText size={24} color="#000" />
             <View style={styles.actionContent}>
-              <Text style={styles.actionTitle}>Upload Documents</Text>
+              <Text style={styles.actionTitle}>Uploaded Documents</Text>
               <Text style={styles.actionSubtitle}>
-                Keep your business documents up to date
+                View and manage your uploaded business documents
               </Text>
             </View>
           </TouchableOpacity>
@@ -249,35 +502,6 @@ export default function DashboardScreen() {
               </Text>
             </View>
           </TouchableOpacity>
-        </View>
-
-        {/* Recent Activity */}
-        <View style={styles.recentActivity}>
-          <Text style={styles.sectionTitle}>Recent Activity</Text>
-
-          <View style={styles.activityItem}>
-            <View style={styles.activityDot} />
-            <View style={styles.activityContent}>
-              <Text style={styles.activityTitle}>New order received</Text>
-              <Text style={styles.activityTime}>2 hours ago</Text>
-            </View>
-          </View>
-
-          <View style={styles.activityItem}>
-            <View style={styles.activityDot} />
-            <View style={styles.activityContent}>
-              <Text style={styles.activityTitle}>Payment processed</Text>
-              <Text style={styles.activityTime}>4 hours ago</Text>
-            </View>
-          </View>
-
-          <View style={styles.activityItem}>
-            <View style={styles.activityDot} />
-            <View style={styles.activityContent}>
-              <Text style={styles.activityTitle}>Document verified</Text>
-              <Text style={styles.activityTime}>1 day ago</Text>
-            </View>
-          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -416,7 +640,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   quickActions: {
-    marginBottom: 8,
+    marginBottom: 32,
   },
   actionCard: {
     flexDirection: 'row',
@@ -442,38 +666,104 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
   },
-  recentActivity: {
-    marginBottom: 32,
+  newOrdersSection: {
+    marginBottom: 8,
   },
-  activityItem: {
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  viewAllText: {
+    fontSize: 14,
+    color: '#000',
+    fontWeight: '600',
+  },
+  orderCard: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 8,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: '#e5e5e5',
   },
-  activityDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#000',
-    marginRight: 16,
-  },
-  activityContent: {
+  orderCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flex: 1,
   },
-  activityTitle: {
+  orderIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  orderInfo: {
+    flex: 1,
+  },
+  orderNumber: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 4,
+  },
+  orderTotal: {
     fontSize: 14,
     fontWeight: '500',
     color: '#000',
-    marginBottom: 2,
+    marginBottom: 4,
   },
-  activityTime: {
+  orderMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  orderTime: {
     fontSize: 12,
     color: '#666',
+  },
+  orderCardRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#000',
+  },
+  emptyOrdersContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  emptyOrdersText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  emptyOrdersSubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
   },
   loadingContainer: {
     padding: 40,

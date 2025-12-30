@@ -168,7 +168,16 @@ export async function getCurrentUser() {
   try {
     const response = await authApi.verifyToken();
     return response.user;
-  } catch (error) {
+  } catch (error: any) {
+    // Suppress expected authentication errors
+    const errorMsg = error?.message || '';
+    if (!errorMsg.includes('Session expired') && 
+        !errorMsg.includes('No token') && 
+        !errorMsg.includes('Invalid API key') &&
+        !errorMsg.includes('401')) {
+      console.error('Error verifying token:', error);
+    }
+    
     currentToken = null;
     apiClient.setToken(null);
     // Remove from storage on error

@@ -8,11 +8,13 @@ import {
   StyleSheet,
   StatusBar,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
 import { useRegistration } from '@/contexts/RegistrationContext';
+import { checkMobileNumberExists } from '@/services/shops';
 
 const TOTAL_STEPS = 7;
 const CURRENT_STEP = 2;
@@ -34,6 +36,9 @@ export default function Step2ContactDetails() {
     isWhatsAppSame: true,
     whatsappNumber: '',
   });
+  
+  const [isCheckingMobile, setIsCheckingMobile] = useState(false);
+  const [mobileNumberError, setMobileNumberError] = useState<string | null>(null);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -100,16 +105,58 @@ export default function Step2ContactDetails() {
         </View>
 
         {/* Mobile Number */}
-        <View style={styles.inputWithIcon}>
-          <MaterialIcons name="phone" size={24} color="#555" style={styles.icon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Mobile Number"
-            placeholderTextColor="#999"
-            keyboardType="phone-pad"
-            value={form.mobileNumber}
-            onChangeText={(text) => setForm((f) => ({ ...f, mobileNumber: text }))}
-          />
+        <View>
+          <View style={[
+            styles.inputWithIcon,
+            mobileNumberError && styles.inputWithError
+          ]}>
+            <MaterialIcons 
+              name="phone" 
+              size={24} 
+              color={mobileNumberError ? "#DC2626" : "#555"} 
+              style={styles.icon} 
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Mobile Number"
+              placeholderTextColor="#999"
+              keyboardType="phone-pad"
+              value={form.mobileNumber}
+              onChangeText={(text) => {
+                setForm((f) => ({ ...f, mobileNumber: text }));
+                // Clear error when user starts typing
+                if (mobileNumberError) {
+                  setMobileNumberError(null);
+                }
+              }}
+              onBlur={async () => {
+                // Check if mobile number is already registered when user finishes entering
+                const cleanMobile = form.mobileNumber.trim().replace(/[^\d]/g, '');
+                
+                if (cleanMobile.length >= 10) {
+                  setIsCheckingMobile(true);
+                  const result = await checkMobileNumberExists(cleanMobile);
+                  setIsCheckingMobile(false);
+                  
+                  if (result.exists) {
+                    setMobileNumberError('This mobile number is already registered. Please use a different number.');
+                  } else {
+                    setMobileNumberError(null);
+                  }
+                } else if (form.mobileNumber.trim().length > 0 && cleanMobile.length < 10) {
+                  setMobileNumberError('Please enter a valid 10-digit mobile number.');
+                } else {
+                  setMobileNumberError(null);
+                }
+              }}
+            />
+            {isCheckingMobile && (
+              <ActivityIndicator size="small" color="#1F2937" style={styles.checkingIndicator} />
+            )}
+          </View>
+          {mobileNumberError && (
+            <Text style={styles.errorText}>{mobileNumberError}</Text>
+          )}
         </View>
 
         {/* WhatsApp Information */}
@@ -138,7 +185,8 @@ export default function Step2ContactDetails() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.nextButton}
+            style={[styles.nextButton, (mobileNumberError || isCheckingMobile) && styles.nextButtonDisabled]}
+            disabled={!!mobileNumberError || isCheckingMobile}
             onPress={async () => {
               // Validate required fields
               if (!form.email || !form.mobileNumber) {
@@ -147,8 +195,26 @@ export default function Step2ContactDetails() {
               }
               
               // Validate mobile number length
-              if (form.mobileNumber.length < 10) {
+              const cleanMobile = form.mobileNumber.trim().replace(/[^\d]/g, '');
+              if (cleanMobile.length < 10) {
                 Alert.alert('Invalid Mobile Number', 'Please enter a valid mobile number (at least 10 digits).');
+                return;
+              }
+              
+              // Check if mobile number is already registered before proceeding
+              if (!mobileNumberError) {
+                setIsCheckingMobile(true);
+                const result = await checkMobileNumberExists(cleanMobile);
+                setIsCheckingMobile(false);
+                
+                if (result.exists) {
+                  setMobileNumberError('This mobile number is already registered. Please use a different number.');
+                  Alert.alert('Mobile Number Already Registered', 'This mobile number is already registered. Please use a different number or sign in if you have an account.');
+                  return;
+                }
+              } else {
+                // If there's an error, don't proceed
+                Alert.alert('Invalid Mobile Number', mobileNumberError);
                 return;
               }
               
@@ -282,6 +348,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#111827',
     fontWeight: '500',
+  },
+  inputWithError: {
+    borderColor: '#DC2626',
+    borderWidth: 2,
+  },
+  errorText: {
+    color: '#DC2626',
+    fontSize: 14,
+    marginTop: -12,
+    marginBottom: 12,
+    marginLeft: 52,
+    fontWeight: '500',
+  },
+  checkingIndicator: {
+    marginLeft: 8,
   },
   whatsAppContainer: {
     marginBottom: 16,

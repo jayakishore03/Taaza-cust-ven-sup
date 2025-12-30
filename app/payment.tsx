@@ -207,9 +207,18 @@ export default function PaymentScreen() {
 
             // For Cash on Delivery, create order directly
             if (isCod) {
+              // Validate shop is selected
+              if (!selectedShop || !selectedShop.id) {
+                Alert.alert('Shop Required', 'Please select a shop before placing your order.', [
+                  { text: 'OK', onPress: () => router.replace('/(tabs)') }
+                ]);
+                setIsProcessing(false);
+                return;
+              }
+
               console.log('Creating COD order with address:', finalAddressId);
               const order = await ordersApi.create({
-                shopId: selectedShop?.id || undefined,
+                shopId: selectedShop.id,
                 addressId: finalAddressId,
                 items: cartItems.map((item) => {
                   const weightInKg = item.product.weightInKg || 1.0;
@@ -289,11 +298,20 @@ export default function PaymentScreen() {
 
       const finalAddressId = addressId || user?.address?.id || '';
 
+      // Validate shop is selected
+      if (!selectedShop || !selectedShop.id) {
+        Alert.alert('Shop Required', 'Please select a shop before placing your order.', [
+          { text: 'OK', onPress: () => router.replace('/(tabs)') }
+        ]);
+        setIsProcessing(false);
+        return;
+      }
+
       console.log('Creating order after payment with address:', finalAddressId);
       
       // Create order after successful payment verification
       await ordersApi.create({
-        shopId: selectedShop?.id || undefined,
+        shopId: selectedShop.id,
         addressId: finalAddressId,
         items: cartItems.map((item) => {
           const weightInKg = item.product.weightInKg || 1.0;

@@ -57,12 +57,12 @@ export async function uploadImageToStorage(
     // Determine content type
     const contentType = `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`;
 
-    // Upload to Supabase Storage
+    // Upload to Supabase Storage (use upsert so updating a doc overwrites the old one)
     const { data, error } = await supabase.storage
       .from(bucket)
       .upload(storagePath, arrayBuffer, {
         contentType,
-        upsert: false,
+        upsert: true,
       });
 
     if (error) {
@@ -155,11 +155,14 @@ export async function uploadDocument(
     return { success: true, url: uri };
   }
 
+  // Use a unique file name each time so we don't hit CDN/browser cache
+  const uniqueName = `${documentType}-${Date.now()}`;
+
   return uploadImageToStorage(
     uri,
     'shop-documents', // Supabase bucket name
     `shops/${shopId}`, // Folder
-    documentType // File name prefix
+    uniqueName // Unique file name (prevents stale cached images)
   );
 }
 

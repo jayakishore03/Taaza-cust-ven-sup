@@ -6,6 +6,7 @@
 import { supabase, supabaseAdmin } from '../config/database.js';
 import crypto from 'crypto';
 import { logActivity } from '../utils/activityLogger.js';
+import { sendOTPEmail } from '../services/emailService.js';
 
 /**
  * Generate a simple token (for development)
@@ -76,11 +77,69 @@ export const signUp = async (req, res, next) => {
       });
     }
 
+    // Check if Supabase is properly configured
+    if (!supabase || !supabaseAdmin) {
+      console.error('❌ Supabase clients not initialized');
+      return res.status(500).json({
+        success: false,
+        error: { message: 'The server is not properly configured. Please contact support or try again later.' },
+      });
+    }
+
+    // Test Supabase connection with a simple query
+    console.log('🔍 Testing Supabase connection...');
+    const { error: connectionTestError } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .limit(1);
+    
+    if (connectionTestError) {
+      const errorMsg = connectionTestError.message || '';
+      console.error('❌ Supabase connection test failed:', connectionTestError);
+      console.error('   Error message:', errorMsg);
+      console.error('   Error code:', connectionTestError.code);
+      console.error('   Error hint:', connectionTestError.hint);
+      
+      // Check if it's a configuration error
+      if (errorMsg.includes('Invalid API key') || 
+          errorMsg.includes('JWT') || 
+          errorMsg.includes('not configured') ||
+          errorMsg.includes('JWT expired') ||
+          errorMsg.includes('Invalid JWT')) {
+        console.error('❌ Supabase API keys are invalid or expired');
+        return res.status(500).json({
+          success: false,
+          error: { message: 'The server is not properly configured. Please contact support or try again later.' },
+        });
+      }
+      
+      // For other errors, log but continue (might be a temporary issue)
+      console.warn('⚠️  Supabase connection test failed, but continuing with sign-up...');
+    } else {
+      console.log('✅ Supabase connection test passed');
+    }
+
     // Check if user already exists in users table (by phone)
-    const { data: existingUsersByPhone } = await supabase
+    const { data: existingUsersByPhone, error: checkPhoneError } = await supabase
       .from('users')
       .select('*')
       .eq('phone', phone);
+
+    // Check for Supabase configuration errors
+    if (checkPhoneError) {
+      const errorMsg = checkPhoneError.message || '';
+      if (errorMsg.includes('Invalid API key') || 
+          errorMsg.includes('JWT') || 
+          errorMsg.includes('Supabase not configured')) {
+        console.error('❌ Supabase configuration error during sign-up:', checkPhoneError);
+        return res.status(500).json({
+          success: false,
+          error: { message: 'The server is not properly configured. Please contact support or try again later.' },
+        });
+      }
+      // For other errors, log but continue (might be a temporary issue)
+      console.warn('⚠️  Error checking existing users by phone:', checkPhoneError);
+    }
 
     if (existingUsersByPhone && existingUsersByPhone.length > 0) {
       return res.status(409).json({
@@ -90,10 +149,25 @@ export const signUp = async (req, res, next) => {
     }
 
     // Also check user_profiles table for phone number
-    const { data: existingProfilesByPhone } = await supabase
+    const { data: existingProfilesByPhone, error: checkProfilePhoneError } = await supabase
       .from('user_profiles')
       .select('id, name, phone')
       .eq('phone', phone);
+
+    // Check for Supabase configuration errors
+    if (checkProfilePhoneError) {
+      const errorMsg = checkProfilePhoneError.message || '';
+      if (errorMsg.includes('Invalid API key') || 
+          errorMsg.includes('JWT') || 
+          errorMsg.includes('Supabase not configured')) {
+        console.error('❌ Supabase configuration error during sign-up:', checkProfilePhoneError);
+        return res.status(500).json({
+          success: false,
+          error: { message: 'The server is not properly configured. Please contact support or try again later.' },
+        });
+      }
+      console.warn('⚠️  Error checking existing profiles by phone:', checkProfilePhoneError);
+    }
 
     if (existingProfilesByPhone && existingProfilesByPhone.length > 0) {
       console.log('⚠️  User profile exists but not in users table:', existingProfilesByPhone[0]);
@@ -105,10 +179,25 @@ export const signUp = async (req, res, next) => {
 
     // Check if user already exists by email in users table
     if (email) {
-      const { data: existingUsersByEmail } = await supabase
+      const { data: existingUsersByEmail, error: checkEmailError } = await supabase
         .from('users')
         .select('*')
         .eq('email', email);
+
+      // Check for Supabase configuration errors
+      if (checkEmailError) {
+        const errorMsg = checkEmailError.message || '';
+        if (errorMsg.includes('Invalid API key') || 
+            errorMsg.includes('JWT') || 
+            errorMsg.includes('Supabase not configured')) {
+          console.error('❌ Supabase configuration error during sign-up:', checkEmailError);
+          return res.status(500).json({
+            success: false,
+            error: { message: 'The server is not properly configured. Please contact support or try again later.' },
+          });
+        }
+        console.warn('⚠️  Error checking existing users by email:', checkEmailError);
+      }
 
       if (existingUsersByEmail && existingUsersByEmail.length > 0) {
       return res.status(409).json({
@@ -118,10 +207,25 @@ export const signUp = async (req, res, next) => {
       }
 
       // Also check user_profiles table for email
-      const { data: existingProfilesByEmail } = await supabase
+      const { data: existingProfilesByEmail, error: checkProfileEmailError } = await supabase
         .from('user_profiles')
         .select('id, name, email')
         .eq('email', email);
+
+      // Check for Supabase configuration errors
+      if (checkProfileEmailError) {
+        const errorMsg = checkProfileEmailError.message || '';
+        if (errorMsg.includes('Invalid API key') || 
+            errorMsg.includes('JWT') || 
+            errorMsg.includes('Supabase not configured')) {
+          console.error('❌ Supabase configuration error during sign-up:', checkProfileEmailError);
+          return res.status(500).json({
+            success: false,
+            error: { message: 'The server is not properly configured. Please contact support or try again later.' },
+          });
+        }
+        console.warn('⚠️  Error checking existing profiles by email:', checkProfileEmailError);
+      }
 
       if (existingProfilesByEmail && existingProfilesByEmail.length > 0) {
         console.log('⚠️  User profile exists but not in users table:', existingProfilesByEmail[0]);
@@ -157,6 +261,19 @@ export const signUp = async (req, res, next) => {
 
     if (userError) {
       console.error('❌ ERROR CREATING USER:', userError);
+      
+      // Check for Supabase configuration errors
+      const errorMsg = userError.message || '';
+      if (errorMsg.includes('Invalid API key') || 
+          errorMsg.includes('JWT') || 
+          errorMsg.includes('Supabase not configured')) {
+        console.error('❌ Supabase configuration error during user creation:', userError);
+        return res.status(500).json({
+          success: false,
+          error: { message: 'The server is not properly configured. Please contact support or try again later.' },
+        });
+      }
+      
       // Handle database constraint errors with user-friendly messages
       if (userError.code === '23505') { // PostgreSQL unique violation error code
         if (userError.message.includes('users_email_key')) {
@@ -200,8 +317,31 @@ export const signUp = async (req, res, next) => {
 
     if (profileError) {
       console.error('❌ ERROR CREATING USER PROFILE:', profileError);
+      
+      // Check for Supabase configuration errors
+      const errorMsg = profileError.message || '';
+      if (errorMsg.includes('Invalid API key') || 
+          errorMsg.includes('JWT') || 
+          errorMsg.includes('Supabase not configured')) {
+        console.error('❌ Supabase configuration error during profile creation:', profileError);
+        // Try to delete the user we just created to maintain consistency
+        try {
+          await supabaseAdmin.from('users').delete().eq('id', userId);
+        } catch (deleteError) {
+          console.error('⚠️  Failed to clean up user after profile creation error:', deleteError);
+        }
+        return res.status(500).json({
+          success: false,
+          error: { message: 'The server is not properly configured. Please contact support or try again later.' },
+        });
+      }
+      
       // Delete the user we just created to maintain consistency
-      await supabaseAdmin.from('users').delete().eq('id', userId);
+      try {
+        await supabaseAdmin.from('users').delete().eq('id', userId);
+      } catch (deleteError) {
+        console.error('⚠️  Failed to clean up user after profile creation error:', deleteError);
+      }
       
       return res.status(500).json({
         success: false,
@@ -902,6 +1042,335 @@ export const resetPassword = async (req, res, next) => {
     try {
       await logActivity(req, 'PASSWORD_RESET', 'User reset password via OTP', 'user', user.id, {
         phone,
+      });
+    } catch (logError) {
+      console.error('Error logging password reset activity:', logError);
+    }
+
+    res.json({
+      success: true,
+      data: { message: 'Password has been reset successfully. You can now sign in with your new password.' },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get vendor email by mobile number
+ * POST /api/auth/get-vendor-email
+ */
+export const getVendorEmailByMobile = async (req, res, next) => {
+  try {
+    const { mobileNumber } = req.body;
+
+    if (!mobileNumber) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Mobile number is required' },
+      });
+    }
+
+    // Clean mobile number (remove any non-digits)
+    const cleanMobile = mobileNumber.trim().replace(/[^\d]/g, '');
+
+    if (cleanMobile.length !== 10) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Invalid mobile number format. Please enter a 10-digit number.' },
+      });
+    }
+
+    // Look up email from shops table using mobile number
+    const { data: shopData, error: shopError } = await supabase
+      .from('shops')
+      .select('email, name, owner_name')
+      .eq('mobile_number', cleanMobile)
+      .maybeSingle();
+
+    if (shopError) {
+      console.error('Error looking up vendor email:', shopError);
+      return res.status(500).json({
+        success: false,
+        error: { message: 'Error looking up vendor information. Please try again.' },
+      });
+    }
+
+    if (!shopData || !shopData.email) {
+      // Don't reveal if vendor exists or not for security
+      return res.json({
+        success: true,
+        data: { 
+          message: 'If this mobile number is registered, an OTP will be sent to the registered email.',
+          email: null, // Don't reveal email for security
+        },
+      });
+    }
+
+    // Return email (for frontend to use, but don't show it in response message)
+    res.json({
+      success: true,
+      data: {
+        email: shopData.email,
+        shopName: shopData.name || shopData.owner_name,
+        message: 'Vendor found. OTP will be sent to registered email.',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Send OTP to email address
+ * POST /api/auth/send-email-otp
+ */
+export const sendEmailOTP = async (req, res, next) => {
+  try {
+    const { email, purpose } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Email address is required' },
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Invalid email format' },
+      });
+    }
+
+    const sanitizedEmail = email.toLowerCase().trim();
+    const otpPurpose = purpose || 'verification';
+
+    // Check if user exists (optional - for password reset)
+    // Check both users table (for regular users) and shops table (for vendors)
+    if (otpPurpose === 'password-reset') {
+      // Check users table
+      const { data: users } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', sanitizedEmail);
+
+      // Check shops table (for vendors)
+      const { data: shops } = await supabase
+        .from('shops')
+        .select('*')
+        .eq('email', sanitizedEmail);
+
+      // If user not found in either table, don't send OTP (for security, don't reveal this)
+      if ((!users || users.length === 0) && (!shops || shops.length === 0)) {
+        // Don't reveal if user exists or not for security
+        return res.json({
+          success: true,
+          data: { message: 'If the email exists, an OTP has been sent.' },
+        });
+      }
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Store OTP in memory (in production, use Redis or database with expiration)
+    if (!global.emailOTPs) {
+      global.emailOTPs = new Map();
+    }
+    
+    // Store OTP with 10 minute expiration and verified flag
+    global.emailOTPs.set(sanitizedEmail, {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+      verified: false,
+      purpose: otpPurpose,
+    });
+
+    // Send OTP via email
+    const emailResult = await sendOTPEmail(sanitizedEmail, otp, otpPurpose);
+
+    if (!emailResult.success) {
+      return res.status(500).json({
+        success: false,
+        error: { message: 'Failed to send OTP email. Please try again.' },
+      });
+    }
+
+    res.json({
+      success: true,
+      data: { 
+        message: 'OTP has been sent to your email address.',
+        // For testing only - remove in production
+        otp: process.env.NODE_ENV === 'development' ? otp : undefined,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Verify email OTP
+ * POST /api/auth/verify-email-otp
+ */
+export const verifyEmailOTP = async (req, res, next) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Email and OTP are required' },
+      });
+    }
+
+    const sanitizedEmail = email.toLowerCase().trim();
+
+    // Check if OTP exists and is valid
+    if (!global.emailOTPs) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Invalid or expired OTP' },
+      });
+    }
+
+    const otpData = global.emailOTPs.get(sanitizedEmail);
+
+    if (!otpData) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Invalid or expired OTP' },
+      });
+    }
+
+    // Check if OTP is expired
+    if (Date.now() > otpData.expiresAt) {
+      global.emailOTPs.delete(sanitizedEmail);
+      return res.status(400).json({
+        success: false,
+        error: { message: 'OTP has expired. Please request a new one.' },
+      });
+    }
+
+    // Verify OTP
+    if (otpData.otp !== otp) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Invalid OTP' },
+      });
+    }
+
+    // Mark OTP as verified
+    otpData.verified = true;
+    global.emailOTPs.set(sanitizedEmail, otpData);
+
+    res.json({
+      success: true,
+      data: { 
+        message: 'OTP verified successfully.',
+        purpose: otpData.purpose,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Reset password by email (for vendors using Supabase Auth)
+ * POST /api/auth/reset-password-by-email
+ * This endpoint resets password after email OTP verification
+ */
+export const resetPasswordByEmail = async (req, res, next) => {
+  try {
+    const { email, newPassword } = req.body;
+
+    if (!email || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Email and new password are required' },
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Password must be at least 6 characters long' },
+      });
+    }
+
+    const sanitizedEmail = email.toLowerCase().trim();
+
+    // Check if email OTP was verified
+    if (!global.emailOTPs) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'OTP verification required. Please verify OTP first.' },
+      });
+    }
+
+    const otpData = global.emailOTPs.get(sanitizedEmail);
+
+    if (!otpData) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'OTP verification required. Please verify OTP first.' },
+      });
+    }
+
+    // Check if OTP is verified
+    if (!otpData.verified) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'OTP must be verified before resetting password.' },
+      });
+    }
+
+    // Check if OTP is expired
+    if (Date.now() > otpData.expiresAt) {
+      global.emailOTPs.delete(sanitizedEmail);
+      return res.status(400).json({
+        success: false,
+        error: { message: 'OTP has expired. Please request a new one.' },
+      });
+    }
+
+    // Find user by email in Supabase Auth
+    const { data: { users }, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+    
+    if (listError) {
+      throw listError;
+    }
+
+    const user = users.find(u => u.email?.toLowerCase() === sanitizedEmail);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: { message: 'User not found' },
+      });
+    }
+
+    // Update password using Supabase Admin API
+    const { data: updatedUser, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+      user.id,
+      { password: newPassword }
+    );
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    // Remove OTP after successful reset
+    global.emailOTPs.delete(sanitizedEmail);
+
+    // Log password reset activity
+    try {
+      await logActivity(req, 'PASSWORD_RESET', 'Vendor reset password via email OTP', 'user', user.id, {
+        email: sanitizedEmail,
       });
     } catch (logError) {
       console.error('Error logging password reset activity:', logError);

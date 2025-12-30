@@ -58,11 +58,19 @@ router.post('/welcome/:shopId', async (req, res, next) => {
       });
     }
   } catch (error) {
-    next(error);
+    console.error('[Email Route] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: { 
+        message: error.message || 'Failed to send email',
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      }
+    });
   }
 });
 
 export default router;
+
 
 
 

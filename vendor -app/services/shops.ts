@@ -1107,31 +1107,84 @@ export const signInVendor = async (
       console.log('[signInVendor] Input is mobile number, looking up email...');
       
       // Look up email from shops table using mobile number
-      const { data: shopData, error: shopError } = await supabase
+      // Use .maybeSingle() instead of .single() to handle no results gracefully
+      // Add timeout to prevent hanging
+      const shopLookupPromise = supabase
         .from('shops')
         .select('email')
         .eq('mobile_number', mobileNumberOrEmail.trim())
-        .single();
+        .maybeSingle();
       
-      if (shopError || !shopData || !shopData.email) {
-        console.error('[signInVendor] Mobile number not found:', shopError);
+      const lookupTimeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Mobile lookup timeout')), 3000)
+      );
+      
+      let shopData, shopError;
+      try {
+        const result = await Promise.race([shopLookupPromise, lookupTimeout]) as any;
+        shopData = result.data;
+        shopError = result.error;
+      } catch (error: any) {
+        console.warn('[signInVendor] Mobile lookup timed out:', error.message);
+        shopError = { message: 'Timeout' };
+        shopData = null;
+      }
+      
+      if (shopError) {
+        console.error('[signInVendor] Error looking up mobile number:', shopError);
+        // If RLS is blocking access, provide helpful message
+        if (shopError.code === '42501' || shopError.message?.includes('permission') || shopError.message?.includes('policy')) {
+          return {
+            success: false,
+            error: 'Unable to verify mobile number. Please contact support or try signing in with your email address instead.',
+          };
+        }
         return {
           success: false,
-          error: 'Mobile number not registered. Please check your number or sign up.',
+          error: 'Error looking up mobile number. Please check your number or try signing in with your email address.',
+        };
+      }
+      
+      if (!shopData || !shopData.email) {
+        // Mobile number not found - return user-friendly error message
+        // Don't log error to console to avoid showing technical error to user
+        return {
+          success: false,
+          error: 'This number is not registered. Please check your number or sign up if you are a new vendor.',
         };
       }
       
       emailToUse = shopData.email;
-      console.log('[signInVendor] Found email for mobile number');
+      console.log('[signInVendor] Found email for mobile number:', emailToUse);
     }
     
     console.log('[signInVendor] Attempting sign-in with email');
     
-    // Step 1: Sign in with Supabase Auth
-    let { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+    // Step 1: Sign in with Supabase Auth (with timeout to prevent hanging)
+    const authPromise = supabase.auth.signInWithPassword({
       email: emailToUse,
       password: password,
     });
+    
+    const authTimeout = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Authentication timeout')), 8000)
+    );
+    
+    let authData, authError;
+    try {
+      const result = await Promise.race([authPromise, authTimeout]) as any;
+      authData = result.data;
+      authError = result.error;
+    } catch (error: any) {
+      if (error.message === 'Authentication timeout') {
+        return {
+          success: false,
+          error: 'Sign-in is taking too long. Please check your internet connection and try again.',
+        };
+      }
+      // Re-throw other errors
+      throw error;
+    }
 
     if (authError) {
       console.error('[signInVendor] Auth error:', authError);
@@ -1162,123 +1215,141 @@ export const signInVendor = async (
           const confirmEndpoint = `${API_CONFIG.BASE_URL}/auth/confirm-vendor-email`;
           console.log('[signInVendor] Calling confirmation endpoint:', confirmEndpoint);
           
-          // Call backend endpoint to auto-confirm email
-          const confirmResponse = await fetch(confirmEndpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ email: emailToUse }),
-          });
-
-          console.log('[signInVendor] Confirmation response status:', confirmResponse.status);
-
-          // Read response body only once
-          const responseText = await confirmResponse.text();
-          let confirmResult;
+          // Call backend endpoint to auto-confirm email with timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
           
+          let confirmResponse;
           try {
-            confirmResult = JSON.parse(responseText);
-          } catch (e) {
-            // If not JSON, create error object
-            confirmResult = {
-              success: false,
-              error: { message: responseText || 'Failed to confirm email' }
-            };
+            confirmResponse = await fetch(confirmEndpoint, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ email: emailToUse }),
+              signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+          } catch (fetchError: any) {
+            clearTimeout(timeoutId);
+            if (fetchError.name === 'AbortError') {
+              console.warn('[signInVendor] Confirmation endpoint timeout, skipping...');
+              // Skip confirmation and try direct sign-in
+              confirmResponse = null;
+            } else {
+              throw fetchError;
+            }
           }
 
-          if (!confirmResponse.ok) {
-            console.error('[signInVendor] Confirmation endpoint error:', confirmResult);
-            // If endpoint doesn't exist (404) or fails, try to confirm email directly using Supabase
-            if (confirmResponse.status === 404) {
-              console.log('[signInVendor] Confirmation endpoint not found (404) - attempting direct email confirmation...');
-              
-              // Try to confirm email directly using Supabase Admin (if available)
-              // For now, just try signing in - email might already be confirmed
-              // Or we can manually confirm in Supabase dashboard
-            } else {
-              console.log('[signInVendor] Confirmation failed - trying sign-in anyway...');
-            }
-            
-            // Try signing in anyway - email might already be confirmed
-            // If still fails, user needs to confirm email manually
-            const { data: retryAuthData, error: retryAuthError } = await supabase.auth.signInWithPassword({
-              email: emailToUse,
-              password: password,
-            });
+          if (confirmResponse) {
+            console.log('[signInVendor] Confirmation response status:', confirmResponse.status);
 
-            if (!retryAuthError && retryAuthData?.user) {
-              // Sign-in succeeded - email was already confirmed
-              console.log('[signInVendor] ✅ Vendor authenticated (email was already confirmed)');
-              authData = retryAuthData;
-            } else {
-              // Still failed - email is not confirmed
-              const retryErrorMsg = retryAuthError?.message?.toLowerCase() || '';
-              if (retryErrorMsg.includes('email not confirmed') || retryErrorMsg.includes('not confirmed')) {
-                return {
-                  success: false,
-                  error: 'Your email is not confirmed.\n\nTo fix this:\n1. Go to Supabase Dashboard → Authentication → Users\n2. Find your email and click "Confirm Email"\n\nOR\n\nDisable email confirmation:\n1. Supabase Dashboard → Authentication → Settings → Email Auth\n2. Turn OFF "Enable email confirmations"',
-                };
-              } else {
-                return {
-                  success: false,
-                  error: retryAuthError?.message || authError.message || 'Sign in failed. Please check your credentials.',
-                };
-              }
-            }
-          } else if (confirmResult.success) {
-            console.log('[signInVendor] Email confirmed successfully, retrying sign-in...');
+            // Read response body only once
+            const responseText = await confirmResponse.text();
+            let confirmResult;
             
-            // Wait a moment for Supabase to process the confirmation
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Retry sign-in after confirmation
-            const { data: retryAuthData, error: retryAuthError } = await supabase.auth.signInWithPassword({
-              email: emailToUse,
-              password: password,
-            });
-
-            if (retryAuthError) {
-              console.error('[signInVendor] Retry sign-in error:', retryAuthError);
-              return {
+            try {
+              confirmResult = JSON.parse(responseText);
+            } catch (e) {
+              // If not JSON, create error object
+              confirmResult = {
                 success: false,
-                error: retryAuthError.message || 'Sign in failed after email confirmation. Please try again.',
+                error: { message: responseText || 'Failed to confirm email' }
               };
             }
 
-            // Continue with successful authentication
-            const userId = retryAuthData.user.id;
-            console.log('[signInVendor] Vendor authenticated after email confirmation, userId:', userId);
-            
-            // Set authData for code below to continue with normal flow
-            authData = retryAuthData;
-          } else {
-            // Confirmation endpoint returned success: false
-            console.warn('[signInVendor] Email confirmation returned success: false, trying sign-in anyway...');
+            if (!confirmResponse.ok) {
+              console.error('[signInVendor] Confirmation endpoint error:', confirmResult);
+              // If endpoint doesn't exist (404) or fails, skip confirmation
+              if (confirmResponse.status === 404) {
+                console.log('[signInVendor] Confirmation endpoint not found (404) - skipping...');
+              } else {
+                console.log('[signInVendor] Confirmation failed - trying sign-in anyway...');
+              }
+            } else if (confirmResult.success) {
+              console.log('[signInVendor] Email confirmed successfully, retrying sign-in...');
+              
+              // Wait briefly for Supabase to process (reduced from 1000ms to 500ms)
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
             
             // Try signing in anyway - email might already be confirmed
-            const { data: retryAuthData, error: retryAuthError } = await supabase.auth.signInWithPassword({
+            // Use timeout to prevent hanging
+            const retryAuthPromise = supabase.auth.signInWithPassword({
               email: emailToUse,
               password: password,
             });
-
-            if (!retryAuthError && retryAuthData?.user) {
-              // Sign-in succeeded
-              authData = retryAuthData;
-            } else {
-              // Still failed - email is not confirmed
-              const retryErrorMsg = retryAuthError?.message?.toLowerCase() || '';
-              if (retryErrorMsg.includes('email not confirmed') || retryErrorMsg.includes('not confirmed')) {
-                return {
-                  success: false,
-                  error: 'Your email is not confirmed.\n\nTo fix this:\n1. Go to Supabase Dashboard → Authentication → Users\n2. Find your email and click "Confirm Email"\n\nOR\n\nDisable email confirmation:\n1. Supabase Dashboard → Authentication → Settings → Email Auth\n2. Turn OFF "Enable email confirmations"',
-                };
+            
+            const retryTimeout = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Sign-in timeout')), 5000)
+            );
+            
+            try {
+              const retryResult = await Promise.race([retryAuthPromise, retryTimeout]) as any;
+              if (!retryResult.error && retryResult.data?.user) {
+                // Sign-in succeeded
+                console.log('[signInVendor] ✅ Vendor authenticated');
+                authData = retryResult.data;
               } else {
-                return {
-                  success: false,
-                  error: retryAuthError?.message || authError.message || 'Sign in failed. Please check your credentials.',
-                };
+                // Still failed
+                const retryErrorMsg = retryResult.error?.message?.toLowerCase() || '';
+                if (retryErrorMsg.includes('email not confirmed') || retryErrorMsg.includes('not confirmed')) {
+                  return {
+                    success: false,
+                    error: 'Your email is not confirmed. Please check your inbox or contact support.',
+                  };
+                } else {
+                  return {
+                    success: false,
+                    error: retryResult.error?.message || authError.message || 'Sign in failed. Please check your credentials.',
+                  };
+                }
               }
+            } catch (timeoutError) {
+              return {
+                success: false,
+                error: 'Sign-in is taking too long. Please check your internet connection and try again.',
+              };
+            }
+          } else {
+            // No confirmResponse (timeout or error) - try direct sign-in
+            console.log('[signInVendor] Confirmation request failed/timeout - trying direct sign-in...');
+            
+            // Try signing in anyway - email might already be confirmed
+            const retryAuthPromise = supabase.auth.signInWithPassword({
+              email: emailToUse,
+              password: password,
+            });
+            
+            const retryTimeout = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Sign-in timeout')), 5000)
+            );
+            
+            try {
+              const retryResult = await Promise.race([retryAuthPromise, retryTimeout]) as any;
+              if (!retryResult.error && retryResult.data?.user) {
+                // Sign-in succeeded
+                authData = retryResult.data;
+              } else {
+                // Still failed
+                const retryErrorMsg = retryResult.error?.message?.toLowerCase() || '';
+                if (retryErrorMsg.includes('email not confirmed') || retryErrorMsg.includes('not confirmed')) {
+                  return {
+                    success: false,
+                    error: 'Your email is not confirmed. Please check your inbox or contact support.',
+                  };
+                } else {
+                  return {
+                    success: false,
+                    error: retryResult.error?.message || authError.message || 'Sign in failed. Please check your credentials.',
+                  };
+                }
+              }
+            } catch (timeoutError) {
+              return {
+                success: false,
+                error: 'Sign-in is taking too long. Please check your internet connection and try again.',
+              };
             }
           }
         } catch (confirmError: any) {
@@ -1301,13 +1372,15 @@ export const signInVendor = async (
       }
       
       // Handle other authentication errors with better messages
-      let errorMessage = authError.message || 'Invalid email or password';
+      let errorMessage = authError.message || 'Invalid mobile number or password';
       
       if (authError.message?.includes('Invalid login credentials') || 
           authError.message?.includes('invalid_credentials')) {
-        errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+        errorMessage = 'Invalid mobile number or password. Please check your credentials and try again.';
       } else if (authError.message?.includes('User not found')) {
-        errorMessage = 'No account found with this email. Please sign up first.';
+        errorMessage = 'No account found. Please check your mobile number or sign up if you are a new vendor.';
+      } else if (authError.message?.includes('Email rate limit') || authError.message?.includes('rate limit')) {
+        errorMessage = 'Too many sign-in attempts. Please wait a few minutes and try again.';
       }
       
       return {
@@ -1328,17 +1401,32 @@ export const signInVendor = async (
 
     // Step 2: Fetch shop details from shops table using user_id or email
     // All vendor data is now in shops table (no vendors table)
-    const { data: shops, error: shopError } = await supabase
+    // Use Promise.race with timeout to prevent hanging
+    const shopQueryPromise = supabase
       .from('shops')
       .select('*')
       .or(`user_id.eq.${userId},email.eq.${emailToUse}`)
       .limit(1)
-      .single();
-
-    if (shopError) {
-      console.error('[signInVendor] Error fetching shop:', shopError);
-      // If shop not found, still allow sign-in but without shop data
+      .maybeSingle();
+    
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Shop lookup timeout')), 5000)
+    );
+    
+    let shops, shopError;
+    try {
+      const result = await Promise.race([shopQueryPromise, timeoutPromise]) as any;
+      shops = result.data;
+      shopError = result.error;
+    } catch (error: any) {
+      console.warn('[signInVendor] Shop lookup timed out or failed:', error.message);
+      shopError = { message: 'Timeout' };
+      shops = null;
+    }
+    
+    if (shopError || !shops) {
       console.warn('[signInVendor] Shop not found for vendor, continuing without shop data');
+      // Return success immediately - shop can be loaded later
       return {
         success: true,
         user: {
@@ -1373,6 +1461,41 @@ export const signInVendor = async (
       success: false,
       error: error.message || 'Failed to sign in',
     };
+  }
+};
+
+/**
+ * Check if mobile number is already registered
+ * Returns true if number exists, false otherwise
+ */
+export const checkMobileNumberExists = async (mobileNumber: string): Promise<{ exists: boolean; error?: string }> => {
+  try {
+    // Clean mobile number (remove spaces and non-digits)
+    const cleanMobile = mobileNumber.trim().replace(/[^\d]/g, '');
+    
+    if (!cleanMobile || cleanMobile.length < 10) {
+      return { exists: false };
+    }
+    
+    // Check if mobile number exists in shops table
+    const { data, error } = await supabase
+      .from('shops')
+      .select('id, mobile_number')
+      .eq('mobile_number', cleanMobile)
+      .maybeSingle();
+    
+    if (error) {
+      // If it's a permission error, don't fail - just return false
+      if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('policy')) {
+        return { exists: false };
+      }
+      return { exists: false, error: error.message };
+    }
+    
+    return { exists: !!data };
+  } catch (error: any) {
+    // Don't log error to console - just return false
+    return { exists: false, error: error.message };
   }
 };
 
@@ -1419,6 +1542,60 @@ export const getShopByVendorId = async (vendorId: string): Promise<Shop | null> 
   } catch (error) {
     console.error('[getShopByVendorId] Exception:', error);
     return null;
+  }
+};
+
+/**
+ * Update a single document field for a shop
+ * Used by the vendor app "Update Documents" screen
+ */
+export const updateShopDocument = async (
+  shopId: string,
+  documentType: 'pan' | 'gst' | 'fssai' | 'shopLicense' | 'aadhaar',
+  url: string
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const fieldMap: Record<typeof documentType, keyof Shop> = {
+      pan: 'pan_document',
+      gst: 'gst_document',
+      fssai: 'fssai_document',
+      shopLicense: 'shop_license_document',
+      aadhaar: 'aadhaar_document',
+    };
+
+    const columnName = fieldMap[documentType];
+
+    const updatePayload: Partial<Shop> & { updated_at: string } = {
+      [columnName]: url,
+      updated_at: new Date().toISOString(),
+    } as any;
+
+    const { error } = await supabase
+      .from('shops')
+      .update(updatePayload)
+      .eq('id', shopId);
+
+    if (error) {
+      console.error('[updateShopDocument] Error updating document field:', {
+        shopId,
+        documentType,
+        columnName,
+        error,
+      });
+      return { success: false, error: error.message || 'Failed to update document' };
+    }
+
+    console.log('[updateShopDocument] Document updated successfully:', {
+      shopId,
+      documentType,
+      columnName,
+      url,
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('[updateShopDocument] Exception:', error);
+    return { success: false, error: error.message || 'Failed to update document' };
   }
 };
 

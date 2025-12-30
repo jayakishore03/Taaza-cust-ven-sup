@@ -3,7 +3,7 @@
  */
 
 import express from 'express';
-import { signUp, signIn, verifyAuthToken, sendPasswordResetOTP, verifyPasswordResetOTP, resetPassword, checkPhoneExists, cleanupOrphanedProfile, confirmVendorEmail } from '../controllers/authController.js';
+import { signUp, signIn, verifyAuthToken, sendPasswordResetOTP, verifyPasswordResetOTP, resetPassword, checkPhoneExists, cleanupOrphanedProfile, confirmVendorEmail, sendEmailOTP, verifyEmailOTP, getVendorEmailByMobile, resetPasswordByEmail } from '../controllers/authController.js';
 
 const router = express.Router();
 
@@ -33,6 +33,18 @@ router.post('/reset-password', resetPassword);
 
 // Auto-confirm vendor email (for development)
 router.post('/confirm-vendor-email', confirmVendorEmail);
+
+// Send OTP to email
+router.post('/send-email-otp', sendEmailOTP);
+
+// Verify email OTP
+router.post('/verify-email-otp', verifyEmailOTP);
+
+// Get vendor email by mobile number (for forgot password)
+router.post('/get-vendor-email', getVendorEmailByMobile);
+
+// Reset password by email (for vendors using Supabase Auth)
+router.post('/reset-password-by-email', resetPasswordByEmail);
 
 export default router;
 

@@ -16,6 +16,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useCart } from '../contexts/CartContext';
 import { productsApi } from '../lib/api/products';
+import { useProducts } from '../contexts/ProductsContext';
 import { ActivityIndicator } from 'react-native';
 
 export default function ProductDetailsScreen() {
@@ -31,12 +32,13 @@ export default function ProductDetailsScreen() {
   const [quantity, setQuantity] = useState(DEFAULT_QUANTITY);
   const [selectedWeight, setSelectedWeight] = useState(DEFAULT_WEIGHT); // Weight in kg
   const [isLoading, setIsLoading] = useState(true);
-  const { addToCart } = useCart();
+  const { addToCart, selectedShop } = useCart();
   const { isAuthenticated } = useAuth();
+  const { getProductById: getCachedProductById } = useProducts();
   const [product, setProduct] = useState<Product | null>(null);
 
   useEffect(() => {
-    const fetchProduct = async () => {
+    const loadProduct = async () => {
       if (!productId) {
         setIsLoading(false);
         return;
@@ -44,10 +46,26 @@ export default function ProductDetailsScreen() {
 
       try {
         setIsLoading(true);
+        
+        // INSTANT: Try to get product from cache first
+        const startTime = Date.now();
+        const cachedProduct = getCachedProductById(productId);
+        
+        if (cachedProduct) {
+          const loadTime = Date.now() - startTime;
+          console.log(`[ProductDetails] ⚡ Product loaded from cache in ${loadTime}ms`);
+          setProduct(cachedProduct);
+          setSelectedWeight(cachedProduct.weightInKg);
+          setIsLoading(false);
+          return;
+        }
+        
+        // Fallback: If not in cache, fetch from API
+        console.log('[ProductDetails] Product not in cache, fetching from API...');
         const productData = await productsApi.getById(productId);
         if (productData) {
           setProduct(productData);
-          setSelectedWeight(productData.weightInKg); // Default weight
+          setSelectedWeight(productData.weightInKg);
         } else {
           Alert.alert('Error', 'Product not found', [
             { text: 'OK', onPress: () => router.back() },
@@ -63,8 +81,8 @@ export default function ProductDetailsScreen() {
       }
     };
 
-    fetchProduct();
-  }, [productId, router]);
+    loadProduct();
+  }, [productId, router, getCachedProductById]);
 
   useEffect(() => {
     if (selectedWeightParam) {
@@ -264,6 +282,39 @@ export default function ProductDetailsScreen() {
               ))}
             </View>
           </View>
+
+          {selectedShop && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Shop Details</Text>
+              <View style={styles.shopCard}>
+                {selectedShop.image && (
+                  <Image
+                    source={
+                      selectedShop.image && selectedShop.image.startsWith('http')
+                        ? { uri: selectedShop.image }
+                        : require('../assets/images/icon.png')
+                    }
+                    style={styles.shopImage}
+                    defaultSource={require('../assets/images/icon.png')}
+                    resizeMode="cover"
+                  />
+                )}
+                <View style={styles.shopInfo}>
+                  <Text style={styles.shopName}>{selectedShop.name}</Text>
+                  {selectedShop.address && (
+                    <Text style={styles.shopAddress} numberOfLines={2}>
+                      📍 {selectedShop.address}
+                    </Text>
+                  )}
+                  {selectedShop.vendor?.shopType && (
+                    <Text style={styles.shopType}>
+                      🏪 {selectedShop.vendor.shopType.charAt(0).toUpperCase() + selectedShop.vendor.shopType.slice(1)} Shop
+                    </Text>
+                  )}
+                </View>
+              </View>
+            </View>
+          )}
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Description</Text>
@@ -513,5 +564,43 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  shopCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  shopImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    marginRight: 16,
+  },
+  shopInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  shopName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1F2937',
+    marginBottom: 8,
+  },
+  shopAddress: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 6,
+    lineHeight: 18,
+  },
+  shopType: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '500',
   },
 });

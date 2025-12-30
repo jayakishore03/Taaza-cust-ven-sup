@@ -69,6 +69,7 @@ function formatOrder(order, items = [], timeline = [], shop = null, address = nu
     orderNumber: order.order_number,
     parentOrder: order.parent_order || '',
     placedOn: formatDate(order.created_at),
+    created_at: order.created_at, // Include raw timestamp for filtering/sorting
     total: `₹${order.total.toFixed(2)}`,
     status: order.status,
     statusNote: order.status_note || '',
@@ -94,6 +95,198 @@ function formatOrder(order, items = [], timeline = [], shop = null, address = nu
     })),
   };
 }
+
+/**
+ * Get all orders for vendor's shop
+ * GET /api/vendor/orders
+ */
+export const getVendorOrders = async (req, res, next) => {
+  try {
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: { message: 'Authentication required' },
+      });
+    }
+
+    console.log('========================================');
+    console.log('🛍️ GET VENDOR ORDERS REQUEST');
+    console.log('========================================');
+    console.log('Vendor User ID:', userId);
+
+    // Try multiple methods to find the vendor's shop
+    
+    // Method 1: Find shop directly by user_id (most reliable)
+    let shopId = null;
+    const { data: shopsByUserId, error: shopByUserIdError } = await supabase
+      .from('shops')
+      .select('id, name, user_id, email, mobile_number, owner_phone, contact_email')
+      .eq('user_id', userId)
+      .limit(1);
+
+    if (!shopByUserIdError && shopsByUserId && shopsByUserId.length > 0) {
+      shopId = shopsByUserId[0].id;
+      console.log('✅ Found shop by user_id:', shopId, 'Shop name:', shopsByUserId[0].name);
+    } else {
+      console.log('❌ Shop not found by user_id, trying alternative methods...');
+      
+      // Method 2: Find shop by user email/phone from users table
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('id, email, phone')
+        .eq('id', userId)
+        .single();
+
+      if (!userError && user) {
+        console.log('Found user in users table:', { email: user.email, phone: user.phone });
+        
+        // Try to find shop by email or phone
+        const { data: shops, error: shopError } = await supabase
+          .from('shops')
+          .select('id, name, email, mobile_number, owner_phone, contact_email')
+          .or(`owner_phone.eq.${user.phone || ''},contact_email.eq.${user.email || ''},mobile_number.eq.${user.phone || ''},email.eq.${user.email || ''}`)
+          .limit(1);
+
+        if (!shopError && shops && shops.length > 0) {
+          shopId = shops[0].id;
+          console.log('✅ Found shop by email/phone:', shopId, 'Shop name:', shops[0].name);
+        } else {
+          console.log('❌ Shop not found by email/phone');
+        }
+      } else {
+        console.log('❌ User not found in users table');
+      }
+    }
+
+    if (!shopId) {
+      console.log('⚠️ No shop found for vendor, returning empty orders');
+      return res.json({
+        success: true,
+        data: [],
+      });
+    }
+
+    // Get all orders for this shop
+    const shopIdStr = String(shopId);
+    console.log('🔍 Querying orders for shop_id:', shopIdStr);
+    
+    const ordersResult = await supabase
+      .from('orders')
+      .select('*')
+      .eq('shop_id', shopIdStr)
+      .order('created_at', { ascending: false });
+
+    if (ordersResult.error) {
+      console.error('❌ Error querying orders:', ordersResult.error);
+      return res.json({
+        success: true,
+        data: [],
+      });
+    }
+
+    const orders = ordersResult.data || [];
+    console.log(`✅ Found ${orders.length} orders for shop ${shopIdStr}`);
+    
+    // Debug: Show sample orders if none found
+    if (orders.length === 0) {
+      const debugOrders = await supabase
+        .from('orders')
+        .select('id, order_number, shop_id, status, created_at, user_id')
+        .not('shop_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      console.log('📋 Sample orders in database (for debugging):', JSON.stringify(debugOrders.data, null, 2));
+      console.log('💡 Note: Check if shop_id in orders matches vendor shop_id:', shopIdStr);
+    } else {
+      console.log('📦 Orders found:', orders.map(o => ({
+        id: o.id,
+        order_number: o.order_number,
+        shop_id: o.shop_id,
+        status: o.status,
+        created_at: o.created_at
+      })));
+    }
+    
+    console.log('========================================');
+
+    // Format and return orders
+    return await formatVendorOrdersResponse(orders, req, res);
+  } catch (error) {
+    console.error('❌ Error in getVendorOrders:', error);
+    next(error);
+  }
+};
+
+// Helper function to format vendor orders response
+async function formatVendorOrdersResponse(orders, req, res) {
+  try {
+    const formattedOrders = await Promise.all(
+      orders.map(async (order) => {
+        const [itemsResult, timelineResult, shopResult, addressResult] = await Promise.all([
+          supabase.from('order_items').select('*').eq('order_id', order.id),
+          supabase.from('order_timeline').select('*').eq('order_id', order.id).order('timestamp', { ascending: true }),
+          order.shop_id ? supabase.from('shops').select('*').eq('id', order.shop_id).single() : Promise.resolve({ data: null }),
+          order.address_id ? supabase.from('addresses').select('*').eq('id', order.address_id).single() : Promise.resolve({ data: null }),
+        ]);
+
+        // Enrich order items with product details if image_url is missing
+        const itemsData = itemsResult.data || [];
+        
+        const enrichedItems = await Promise.all(
+          itemsData.map(async (item) => {
+            // If image_url is missing and product_id exists, fetch from products table
+            if ((!item.image_url || item.image_url === '') && item.product_id) {
+              const productResult = await supabase
+                .from('products')
+                .select('image_url, name, weight, weight_in_kg, price_per_kg')
+                .eq('id', item.product_id)
+                .single();
+              
+              if (productResult.data) {
+                if (!item.image_url && productResult.data.image_url) {
+                  item.image_url = productResult.data.image_url;
+                }
+                if (!item.name && productResult.data.name) {
+                  item.name = productResult.data.name;
+                }
+                if (!item.weight && productResult.data.weight) {
+                  item.weight = productResult.data.weight;
+                }
+                if (!item.weight_in_kg && productResult.data.weight_in_kg) {
+                  item.weight_in_kg = productResult.data.weight_in_kg;
+                }
+                if (!item.price_per_kg && productResult.data.price_per_kg) {
+                  item.price_per_kg = productResult.data.price_per_kg;
+                }
+              }
+            }
+            return item;
+          })
+        );
+
+        const formattedOrder = formatOrder(
+          order,
+          enrichedItems,
+          timelineResult.data || [],
+          shopResult.data,
+          addressResult.data,
+          req
+        );
+        
+        return formattedOrder;
+      })
+    );
+
+    res.json({
+      success: true,
+      data: formattedOrders,
+    });
+  } catch (error) {
+    throw error; // Re-throw to be caught by the calling function
+  }
+};
 
 /**
  * Get all orders for authenticated user
@@ -310,6 +503,15 @@ export const createOrder = async (req, res, next) => {
       });
     }
 
+    // Validate shopId is provided (required for vendor order assignment)
+    if (!shopId) {
+      console.error('❌ No shopId provided in request');
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Shop selection is required. Please select a shop before placing your order.' },
+      });
+    }
+
     // Get user's address if not provided
     let finalAddressId = addressId;
     if (!finalAddressId) {
@@ -370,9 +572,13 @@ export const createOrder = async (req, res, next) => {
     const now = new Date().toISOString();
     const total = subtotal + finalDeliveryCharge - discount;
 
+    // Ensure shop_id is stored as string to match shops.id type (text)
+    const finalShopId = shopId ? String(shopId) : null;
+    
     console.log('📝 Creating order with data:');
     console.log('  User ID:', userId);
-    console.log('  Shop ID:', shopId || 'None');
+    console.log('  Shop ID (raw):', shopId || 'None');
+    console.log('  Shop ID (final):', finalShopId || 'None');
     console.log('  Address ID:', finalAddressId);
     console.log('  Order Number:', orderNumber);
     console.log('  Subtotal:', subtotal);
@@ -387,7 +593,7 @@ export const createOrder = async (req, res, next) => {
       .from('orders')
       .insert({
         user_id: userId,
-        shop_id: shopId || null,
+        shop_id: finalShopId,
         address_id: finalAddressId,
         order_number: orderNumber,
         subtotal,

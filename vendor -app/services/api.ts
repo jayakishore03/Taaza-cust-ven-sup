@@ -134,6 +134,98 @@ export const signIn = async (data: SignInData): Promise<AuthResponse> => {
   }
 };
 
+// Get vendor email by mobile number (for forgot password)
+export const getVendorEmailByMobile = async (mobileNumber: string): Promise<{ success: boolean; data?: { email: string; shopName?: string; message: string }; error?: { message: string } }> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/get-vendor-email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ mobileNumber }),
+    });
+
+    const result = await response.json();
+    return result;
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        message: error.message || 'Network request failed',
+      },
+    };
+  }
+};
+
+// Send OTP to email
+export const sendEmailOTP = async (email: string, purpose: 'verification' | 'password-reset' = 'password-reset'): Promise<{ success: boolean; data?: { message: string; otp?: string }; error?: { message: string } }> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/send-email-otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email, purpose }),
+    });
+
+    const result = await response.json();
+    return result;
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        message: error.message || 'Network request failed',
+      },
+    };
+  }
+};
+
+// Verify email OTP
+export const verifyEmailOTP = async (email: string, otp: string): Promise<{ success: boolean; data?: { message: string; purpose?: string }; error?: { message: string } }> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/verify-email-otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email, otp }),
+    });
+
+    const result = await response.json();
+    return result;
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        message: error.message || 'Network request failed',
+      },
+    };
+  }
+};
+
+// Reset password via email OTP
+export const resetPasswordByEmail = async (email: string, newPassword: string): Promise<{ success: boolean; data?: { message: string }; error?: { message: string } }> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/reset-password-by-email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email, newPassword }),
+    });
+
+    const result = await response.json();
+    return result;
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        message: error.message || 'Network request failed',
+      },
+    };
+  }
+};
+
 // Sign up
 export const signUp = async (data: SignUpData): Promise<AuthResponse> => {
   try {
@@ -287,11 +379,14 @@ export const saveServices = async (
 
 export interface Order {
   id: string;
-  user_id: string;
-  shop_id: string;
+  user_id?: string;
+  shop_id?: string;
   status: string;
-  total_amount: number;
-  created_at: string;
+  total_amount?: number;
+  total?: string; // Formatted total from backend (e.g., "₹100.00")
+  orderNumber?: string;
+  created_at?: string; // Raw created_at from database
+  placedOn?: string; // Formatted date from backend
   items?: OrderItem[];
   shop?: Shop;
 }
@@ -319,12 +414,32 @@ export interface Product {
 // Get vendor orders (requires authentication)
 export const getVendorOrders = async (): Promise<Order[]> => {
   try {
-    const token = await getAuthToken();
+    // Try to get token from backend auth first
+    let token = await getAuthToken();
+    
+    // If no backend token, try to get Supabase session token
     if (!token) {
-      throw new Error('Not authenticated');
+      try {
+        const { supabase } = await import('../lib/supabase');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          token = session.access_token;
+        }
+      } catch (supabaseError) {
+        // Silently fail - no token available
+      }
     }
 
-    const response = await fetch(`${API_BASE_URL}/orders`, {
+    if (!token) {
+      // No token available, return empty array silently
+      console.log('[getVendorOrders] No auth token available');
+      return [];
+    }
+
+    const url = `${API_BASE_URL}/vendor/orders`;
+    console.log(`[getVendorOrders] Fetching from: ${url}`);
+    
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -332,14 +447,43 @@ export const getVendorOrders = async (): Promise<Order[]> => {
       },
     });
 
+    console.log(`[getVendorOrders] Response status: ${response.status}`);
+
     if (!response.ok) {
-      throw new Error(`Failed to fetch orders: ${response.status}`);
+      // Try to get error details
+      let errorText = '';
+      try {
+        errorText = await response.text();
+        console.warn(`[getVendorOrders] Error response: ${errorText}`);
+      } catch (e) {
+        // Ignore
+      }
+      
+      // Handle 404 gracefully (endpoint may not be deployed yet)
+      if (response.status === 404) {
+        console.warn(`[getVendorOrders] Endpoint not found (404) at ${url}`);
+        console.warn('[getVendorOrders] Make sure the backend is deployed and the /api/vendor/orders route is available');
+        return [];
+      }
+      
+      // Handle authentication errors
+      if (response.status === 401) {
+        console.warn('[getVendorOrders] Authentication failed (401)');
+        return [];
+      }
+      
+      // For other errors, log and return empty array
+      console.warn(`[getVendorOrders] Error ${response.status}: ${errorText || 'Unknown error'}`);
+      return [];
     }
 
     const result = await response.json();
-    return result.data || [];
+    const orders = result.data || [];
+    console.log(`[getVendorOrders] Fetched ${orders.length} orders`);
+    return orders;
   } catch (error: any) {
-    console.error('Error fetching orders:', error);
+    // Log error but return empty array to prevent crashes
+    console.error('[getVendorOrders] Error:', error.message || error);
     return [];
   }
 };
@@ -407,7 +551,6 @@ export const getShopById = async (shopId: string): Promise<Shop | null> => {
 export interface DashboardStats {
   totalOrders: number;
   monthlyRevenue: number;
-  activeCustomers: number;
   pendingOrders: number;
 }
 
@@ -436,13 +579,9 @@ export const getDashboardStats = async (): Promise<DashboardStats | null> => {
       })
       .reduce((sum, o) => sum + (o.total_amount || 0), 0);
     
-    // Get unique customers
-    const uniqueCustomers = new Set(orders.map(o => o.user_id)).size;
-
     return {
       totalOrders,
       monthlyRevenue,
-      activeCustomers: uniqueCustomers,
       pendingOrders,
     };
   } catch (error) {

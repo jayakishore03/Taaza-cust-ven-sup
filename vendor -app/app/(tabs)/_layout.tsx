@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Store, FileText, CreditCard, User } from 'lucide-react-native';
+import { Home, Package, User } from 'lucide-react-native';
 
 export default function TabLayout() {
   return (
@@ -39,28 +39,22 @@ export default function TabLayout() {
       <Tabs.Screen
         name="store"
         options={{
-          title: 'Store',
+          title: 'Products',
           tabBarIcon: ({ size, color }) => (
-            <Store size={size} color={color} />
+            <Package size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="documents"
         options={{
-          title: 'Documents',
-          tabBarIcon: ({ size, color }) => (
-            <FileText size={size} color={color} />
-          ),
+          href: null, // Keep route accessible (for dashboard button) but hide from footer tabs
         }}
       />
       <Tabs.Screen
         name="banking"
         options={{
-          title: 'Banking',
-          tabBarIcon: ({ size, color }) => (
-            <CreditCard size={size} color={color} />
-          ),
+          href: null, // Hide from tab bar but keep route accessible
         }}
       />
       <Tabs.Screen
