@@ -124,15 +124,16 @@ class ApiClient {
         
         // Check if this is a backend configuration error (Supabase not configured)
         if (errorMessage.includes('Invalid API key') || errorMessage.includes('Supabase not configured') ||
-            errorMessage.includes('missing Supabase') || errorMessage.includes('Supabase Admin client not initialized')) {
+            errorMessage.includes('missing Supabase') || errorMessage.includes('Supabase Admin client not initialized') ||
+            errorMessage.includes('Supabase credentials are invalid or missing') ||
+            errorMessage.includes('Supabase credentials are invalid') ||
+            errorMessage.includes('The server is not properly configured') || errorMessage.includes('not properly configured')) {
           // Don't log to console - this is expected when backend is not configured
           // User will see the error in Alert dialog instead
           // Error handler will suppress any console output for backend config errors
           
-          throw new Error(
-            'Backend configuration error. The server is missing Supabase credentials. ' +
-            'Please contact support or check Vercel environment variables.'
-          );
+          // Return the user-friendly error message from backend
+          throw new Error(errorMessage);
         }
         
         // Check if this is an authentication-related error (401 or 500 with auth-related messages)
@@ -164,8 +165,16 @@ class ApiClient {
                                    (isSignInEndpoint && isExpectedAuthError) ||
                                    (isAddressEndpoint && isExpectedAuthError);
           
-          // Only log if it's an unexpected auth error
-          if (__DEV__ && !shouldSuppressLog) {
+          // Suppress logging for backend configuration errors
+          const isBackendConfigError = errorMessage.includes('The server is not properly configured') ||
+                                      errorMessage.includes('not properly configured') ||
+                                      errorMessage.includes('Backend configuration error') ||
+                                      errorMessage.includes('Server configuration error') ||
+                                      errorMessage.includes('Supabase credentials are invalid or missing') ||
+                                      errorMessage.includes('Supabase credentials are invalid');
+          
+          // Only log if it's an unexpected auth error and not a backend config error
+          if (__DEV__ && !shouldSuppressLog && !isBackendConfigError) {
             console.error('❌ API Error Details:');
             console.error('  URL:', url);
             console.error('  Status:', response.status);
@@ -181,8 +190,14 @@ class ApiClient {
           throw new Error('Session expired. Please sign in again.');
         }
         
-        // Log non-auth errors in development
-        if (__DEV__) {
+        // Suppress logging for backend configuration errors
+        const isBackendConfigError = errorMessage.includes('The server is not properly configured') ||
+                                    errorMessage.includes('not properly configured') ||
+                                    errorMessage.includes('Backend configuration error') ||
+                                    errorMessage.includes('Server configuration error');
+        
+        // Log non-auth errors in development (except backend config errors)
+        if (__DEV__ && !isBackendConfigError) {
           console.error('❌ API Error Details:');
           console.error('  URL:', url);
           console.error('  Status:', response.status);
@@ -196,9 +211,20 @@ class ApiClient {
       return data.data as T;
     } catch (error: any) {
       // Handle abort/timeout errors - return a simple error without verbose messages
-      if (error?.name === 'AbortError' || error?.message?.includes('aborted')) {
+      if (error?.name === 'AbortError' || error?.message?.includes('aborted') || error?.name === 'ConnectionTimeout') {
         const timeoutError = new Error('Connection timeout');
         timeoutError.name = 'ConnectionTimeout';
+        
+        // For non-critical endpoints like token verification, suppress the error
+        // This prevents breaking the app when backend is temporarily unavailable
+        const isNonCriticalEndpoint = endpoint.includes('/auth/verify') || 
+                                     endpoint.includes('/health');
+        
+        if (isNonCriticalEndpoint && __DEV__) {
+          // Only log in dev mode, don't throw for non-critical endpoints
+          console.warn(`⚠️ Connection timeout for ${endpoint} - this is non-critical`);
+        }
+        
         throw timeoutError;
       }
       
