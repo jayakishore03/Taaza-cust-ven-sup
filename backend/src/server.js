@@ -176,6 +176,117 @@ app.get('/health/supabase', async (req, res) => {
   }
 });
 
+// Diagnostic endpoint for vendor orders debugging
+app.get('/api/vendor/debug', async (req, res) => {
+  try {
+    const { supabaseAdmin } = await import('./config/database.js');
+    const userId = req.userId; // From auth middleware if present
+    
+    // Get vendor's auth user info
+    let authUserInfo = null;
+    if (userId) {
+      try {
+        const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.getUserById(userId);
+        if (!authError && authUser) {
+          authUserInfo = {
+            id: authUser.user.id,
+            email: authUser.user.email,
+            phone: authUser.user.phone,
+            created_at: authUser.user.created_at
+          };
+        }
+      } catch (err) {
+        console.error('Error fetching auth user:', err);
+      }
+    }
+    
+    // Get shop by user_id
+    let vendorShop = null;
+    if (userId) {
+      const { data: shop, error: shopError } = await supabaseAdmin
+        .from('shops')
+        .select('id, name, user_id, email, mobile_number')
+        .eq('user_id', userId)
+        .limit(1)
+        .maybeSingle();
+      
+      if (!shopError && shop) {
+        vendorShop = shop;
+      }
+    }
+    
+    // Get all shops
+    const { data: allShops } = await supabaseAdmin
+      .from('shops')
+      .select('id, name, user_id, email, mobile_number')
+      .limit(50);
+    
+    // Get all orders with shop_id
+    const { data: allOrders } = await supabaseAdmin
+      .from('orders')
+      .select('id, shop_id, order_number, status, created_at')
+      .not('shop_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    
+    // Get unique shop_ids from orders
+    const shopIdsInOrders = [...new Set(allOrders?.map(o => o.shop_id) || [])];
+    
+    // Get orders for vendor's shop if found
+    let vendorOrders = [];
+    if (vendorShop) {
+      const { data: orders } = await supabaseAdmin
+        .from('orders')
+        .select('id, order_number, status, subtotal, delivery_charge, created_at')
+        .eq('shop_id', vendorShop.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      vendorOrders = orders || [];
+    }
+    
+    res.json({
+      success: true,
+      debug: {
+        authenticated: !!userId,
+        vendorUserId: userId || 'Not authenticated - No token provided',
+        authUserInfo: authUserInfo || 'Not found in auth.users',
+        vendorShop: vendorShop || 'No shop found for this user_id',
+        vendorOrdersCount: vendorOrders.length,
+        vendorOrders: vendorOrders,
+        fixRequired: !vendorShop && userId ? {
+          message: 'Shop user_id does not match vendor auth user_id',
+          sql: `UPDATE shops SET user_id = '${userId}' WHERE id = 'shop-1766319629349-etq87nd4v';`
+        } : null,
+        totalShops: allShops?.length || 0,
+        totalOrders: allOrders?.length || 0,
+        shopIdsInOrders,
+        shops: allShops?.map(s => ({
+          id: s.id,
+          name: s.name,
+          user_id: s.user_id,
+          hasOrders: shopIdsInOrders.includes(s.id),
+          matchesVendor: s.user_id === userId
+        })),
+        recentOrders: allOrders?.map(o => ({
+          id: o.id,
+          shop_id: o.shop_id,
+          order_number: o.order_number,
+          status: o.status,
+          created_at: o.created_at
+        }))
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        message: error.message,
+        stack: error.stack
+      }
+    });
+  }
+});
+
 // API root endpoint
 app.get('/api', (req, res) => {
   res.json({
