@@ -384,18 +384,41 @@ export interface Order {
   status: string;
   total_amount?: number;
   total?: string; // Formatted total from backend (e.g., "₹100.00")
+  subtotal?: number;
+  deliveryCharge?: number;
+  discount?: number;
   orderNumber?: string;
   created_at?: string; // Raw created_at from database
   placedOn?: string; // Formatted date from backend
+  paymentMethod?: string;
   items?: OrderItem[];
+  address?: {
+    id?: string;
+    contactName?: string;
+    phone?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    landmark?: string;
+    label?: string;
+    isDefault?: boolean;
+  };
   shop?: Shop;
 }
 
 export interface OrderItem {
-  id: string;
-  product_id: string;
-  quantity: number;
-  price: number;
+  id?: string;
+  product_id?: string;
+  addon_id?: string;
+  name?: string;
+  quantity?: number;
+  weight?: string;
+  weightInKg?: number;
+  price?: string; // Formatted price from backend (e.g., "₹100.00")
+  pricePerKg?: string; // Formatted price per kg (e.g., "₹100.00/kg")
+  image?: string; // Image URL
+  imageUrl?: string; // Alternative image URL field
   product?: Product;
 }
 
@@ -488,15 +511,96 @@ export const getVendorOrders = async (): Promise<Order[]> => {
   }
 };
 
+// Get vendor order by ID with full details
+export const getVendorOrderById = async (orderId: string): Promise<Order | null> => {
+  try {
+    let token = await getAuthToken();
+    
+    if (!token) {
+      try {
+        const { supabase } = await import('../lib/supabase');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          token = session.access_token;
+        }
+      } catch (supabaseError) {
+        // Silently fail
+      }
+    }
+
+    if (!token) {
+      console.log('[getVendorOrderById] No auth token available');
+      return null;
+    }
+
+    const url = `${API_BASE_URL}/vendor/orders/${orderId}`;
+    console.log(`[getVendorOrderById] Fetching from: ${url}`);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    console.log(`[getVendorOrderById] Response status: ${response.status}`);
+
+    if (!response.ok) {
+      let errorText = '';
+      try {
+        errorText = await response.text();
+        console.warn(`[getVendorOrderById] Error response: ${errorText}`);
+      } catch (e) {
+        // Ignore
+      }
+      
+      if (response.status === 404) {
+        console.warn(`[getVendorOrderById] Order not found (404)`);
+        return null;
+      }
+      
+      if (response.status === 401) {
+        console.warn('[getVendorOrderById] Authentication failed (401)');
+        return null;
+      }
+      
+      console.warn(`[getVendorOrderById] Error ${response.status}: ${errorText || 'Unknown error'}`);
+      return null;
+    }
+
+    const result = await response.json();
+    const order = result.data || null;
+    console.log(`[getVendorOrderById] Fetched order:`, order?.orderNumber || order?.id);
+    return order;
+  } catch (error: any) {
+    console.error('[getVendorOrderById] Error:', error.message || error);
+    return null;
+  }
+};
+
 // Update order status
 export const updateOrderStatus = async (
   orderId: string,
   status: string
-): Promise<{ success: boolean; message?: string }> => {
+): Promise<Order> => {
   try {
-    const token = await getAuthToken();
+    let token = await getAuthToken();
+    
     if (!token) {
-      return { success: false, message: 'Not authenticated' };
+      try {
+        const { supabase } = await import('../lib/supabase');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          token = session.access_token;
+        }
+      } catch (supabaseError) {
+        // Silently fail
+      }
+    }
+
+    if (!token) {
+      throw new Error('Not authenticated');
     }
 
     const response = await fetch(`${API_BASE_URL}/orders/${orderId}`, {
@@ -508,17 +612,27 @@ export const updateOrderStatus = async (
       body: JSON.stringify({ status }),
     });
 
+    if (!response.ok) {
+      throw new Error('Failed to update order status');
+    }
+
     const result = await response.json();
-    return {
-      success: result.success || false,
-      message: result.message || result.error?.message,
-    };
+    
+    // If the response includes the updated order, return it
+    // Otherwise, fetch the order again to get full details
+    if (result.data) {
+      return result.data;
+    } else {
+      // Fetch updated order details
+      const updatedOrder = await getVendorOrderById(orderId);
+      if (updatedOrder) {
+        return updatedOrder;
+      }
+      throw new Error('Failed to get updated order');
+    }
   } catch (error: any) {
     console.error('Error updating order status:', error);
-    return {
-      success: false,
-      message: error.message || 'Failed to update order status',
-    };
+    throw error;
   }
 };
 

@@ -64,6 +64,23 @@ function formatOrder(order, items = [], timeline = [], shop = null, address = nu
     };
   });
 
+  // Format address if provided
+  let formattedAddress = null;
+  if (address) {
+    formattedAddress = {
+      id: address.id,
+      contactName: address.contact_name || '',
+      phone: address.phone || '',
+      street: address.street || '',
+      city: address.city || '',
+      state: address.state || '',
+      postalCode: address.postal_code || '',
+      landmark: address.landmark || '',
+      label: address.label || 'Home',
+      isDefault: address.is_default || false,
+    };
+  }
+
   return {
     id: order.id,
     orderNumber: order.order_number,
@@ -71,6 +88,10 @@ function formatOrder(order, items = [], timeline = [], shop = null, address = nu
     placedOn: formatDate(order.created_at),
     created_at: order.created_at, // Include raw timestamp for filtering/sorting
     total: `₹${order.total.toFixed(2)}`,
+    total_amount: order.total, // Include numeric total for calculations
+    subtotal: order.subtotal || 0,
+    deliveryCharge: order.delivery_charge || 0,
+    discount: order.discount || 0,
     status: order.status,
     statusNote: order.status_note || '',
     shopName: shop?.name || '',
@@ -87,6 +108,7 @@ function formatOrder(order, items = [], timeline = [], shop = null, address = nu
       mobile: order.delivery_agent_mobile || '',
     } : undefined,
     items: formattedItems,
+    address: formattedAddress,
     timeline: timeline.map(event => ({
       stage: event.stage,
       description: event.description,
@@ -137,20 +159,35 @@ export const getVendorOrders = async (req, res, next) => {
           const vendorEmail = authUser.user.email;
           const vendorPhone = authUser.user.phone;
           
-          // Find shop by email or phone
-          const { data: shopsByContact } = await supabase
-            .from('shops')
-            .select('id, name')
-            .or(`email.eq.${vendorEmail || ''},mobile_number.eq.${vendorPhone || ''},owner_phone.eq.${vendorPhone || ''}`)
-            .limit(1);
+          console.log('🔍 Trying to find shop by vendor email/phone:', { 
+            email: vendorEmail, 
+            phone: vendorPhone 
+          });
           
-          if (shopsByContact && shopsByContact.length > 0) {
-            shopId = shopsByContact[0].id;
-            console.log('✅ Found shop by email/phone:', shopId);
+          // Build OR query properly
+          let query = supabase.from('shops').select('id, name, email, mobile_number');
+          
+          if (vendorEmail) {
+            query = query.or(`email.eq.${vendorEmail},mobile_number.eq.${vendorPhone || ''},owner_phone.eq.${vendorPhone || ''}`);
+          } else if (vendorPhone) {
+            query = query.or(`mobile_number.eq.${vendorPhone},owner_phone.eq.${vendorPhone}`);
           }
+          
+          const { data: shopsByContact, error: shopError } = await query.limit(1);
+          
+          if (shopError) {
+            console.log('❌ Error finding shop by email/phone:', shopError.message);
+          } else if (shopsByContact && shopsByContact.length > 0) {
+            shopId = shopsByContact[0].id;
+            console.log('✅ Found shop by email/phone:', shopId, 'Shop:', shopsByContact[0]);
+          } else {
+            console.log('❌ No shop found by email/phone');
+          }
+        } else {
+          console.log('⚠️  Auth user not found for userId:', userId);
         }
       } catch (err) {
-        console.log('⚠️  Could not get auth user info:', err.message);
+        console.log('⚠️  Error getting auth user info:', err.message);
       }
     }
 
@@ -198,6 +235,154 @@ export const getVendorOrders = async (req, res, next) => {
     return await formatVendorOrdersResponse(orders, req, res);
   } catch (error) {
     console.error('❌ Error in getVendorOrders:', error);
+    next(error);
+  }
+};
+
+/**
+ * Get vendor order by ID with full details
+ * GET /api/vendor/orders/:id
+ */
+export const getVendorOrderById = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: { message: 'Authentication required' },
+      });
+    }
+
+    console.log('========================================');
+    console.log('🛍️ GET VENDOR ORDER BY ID REQUEST');
+    console.log('========================================');
+    console.log('Vendor User ID:', userId);
+    console.log('Order ID:', id);
+
+    // Find vendor's shop
+    let shopId = null;
+    
+    // Method 1: Find shop by user_id
+    const { data: shopsByUserId } = await supabase
+      .from('shops')
+      .select('id, name')
+      .eq('user_id', userId)
+      .limit(1);
+
+    if (shopsByUserId && shopsByUserId.length > 0) {
+      shopId = shopsByUserId[0].id;
+      console.log('✅ Found shop by user_id:', shopId);
+    } else {
+      // Method 2: Get vendor's email/phone from auth.users and find shop by email/phone
+      try {
+        const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+        if (authUser?.user) {
+          const vendorEmail = authUser.user.email;
+          const vendorPhone = authUser.user.phone;
+          
+          const { data: shopsByContact } = await supabase
+            .from('shops')
+            .select('id, name')
+            .or(`email.eq.${vendorEmail || ''},mobile_number.eq.${vendorPhone || ''},owner_phone.eq.${vendorPhone || ''}`)
+            .limit(1);
+          
+          if (shopsByContact && shopsByContact.length > 0) {
+            shopId = shopsByContact[0].id;
+            console.log('✅ Found shop by email/phone:', shopId);
+          }
+        }
+      } catch (err) {
+        console.log('⚠️  Could not get auth user info:', err.message);
+      }
+    }
+
+    if (!shopId) {
+      console.log('⚠️ No shop found for vendor');
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Shop not found for vendor' },
+      });
+    }
+
+    // Get order and verify it belongs to this shop
+    const orderResult = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .eq('shop_id', shopId)
+      .single();
+
+    if (!orderResult.data) {
+      console.log('⚠️ Order not found or does not belong to this shop');
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Order not found' },
+      });
+    }
+
+    const order = orderResult.data;
+    console.log('✅ Order found:', order.order_number);
+
+    // Fetch related data
+    const [itemsResult, timelineResult, addressResult] = await Promise.all([
+      supabase.from('order_items').select('*').eq('order_id', order.id),
+      supabase.from('order_timeline').select('*').eq('order_id', order.id).order('timestamp', { ascending: true }),
+      order.address_id ? supabase.from('addresses').select('*').eq('id', order.address_id).single() : Promise.resolve({ data: null }),
+    ]);
+
+    // Enrich order items with product details
+    const enrichedItems = await Promise.all(
+      (itemsResult.data || []).map(async (item) => {
+        if ((!item.image_url || item.image_url === '') && item.product_id) {
+          const productResult = await supabase
+            .from('products')
+            .select('image_url, name, weight, weight_in_kg, price_per_kg')
+            .eq('id', item.product_id)
+            .single();
+          
+          if (productResult.data) {
+            if (!item.image_url && productResult.data.image_url) {
+              item.image_url = productResult.data.image_url;
+            }
+            if (!item.name && productResult.data.name) {
+              item.name = productResult.data.name;
+            }
+            if (!item.weight && productResult.data.weight) {
+              item.weight = productResult.data.weight;
+            }
+            if (!item.weight_in_kg && productResult.data.weight_in_kg) {
+              item.weight_in_kg = productResult.data.weight_in_kg;
+            }
+            if (!item.price_per_kg && productResult.data.price_per_kg) {
+              item.price_per_kg = productResult.data.price_per_kg;
+            }
+          }
+        }
+        return item;
+      })
+    );
+
+    console.log('✅ Order details retrieved:', {
+      items: enrichedItems.length,
+      timeline: timelineResult.data?.length || 0,
+      address: addressResult.data ? 'Yes' : 'No'
+    });
+
+    res.json({
+      success: true,
+      data: formatOrder(
+        order,
+        enrichedItems,
+        timelineResult.data || [],
+        null, // shop (not needed for vendor)
+        addressResult.data,
+        req
+      ),
+    });
+  } catch (error) {
+    console.error('❌ Error in getVendorOrderById:', error);
     next(error);
   }
 };

@@ -89,12 +89,15 @@ export default function DashboardScreen() {
     // Clear existing interval if any
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
     }
     
     // Poll every 5 seconds for new orders (real-time updates)
+    // This ensures vendors see new orders immediately when customers place them
     pollingIntervalRef.current = setInterval(() => {
+      console.log('[Polling] Fetching orders every 5 seconds...');
       loadNewOrders(true); // Pass true to indicate it's a background poll
-    }, 5000); // 5 seconds for faster updates
+    }, 5000); // 5 seconds - fetches orders based on shop_id from backend
   };
 
   const onRefresh = async () => {
@@ -177,13 +180,14 @@ export default function DashboardScreen() {
         setOrdersLoading(true);
       }
       
+      console.log(`[loadNewOrders] Fetching orders for shop (filtered by shop_id in backend)...`);
       const orders = await getVendorOrders();
       
-      console.log(`[loadNewOrders] Fetched ${orders?.length || 0} orders from API`);
+      console.log(`[loadNewOrders] Fetched ${orders?.length || 0} orders from API (filtered by shop_id)`);
       
       // If no orders returned, set empty array and return early
       if (!orders || orders.length === 0) {
-        console.log('[loadNewOrders] No orders returned from API');
+        console.log('[loadNewOrders] No orders returned from API - waiting for new orders...');
         setNewOrders([]);
         if (!isBackgroundPoll) {
           setOrdersLoading(false);
@@ -249,14 +253,22 @@ export default function DashboardScreen() {
          recentOrders[0]?.id !== newOrders[0]?.id ||
          recentOrders.length !== newOrders.length);
       
-      setNewOrders(recentOrders);
+      // Only update if orders actually changed to avoid unnecessary re-renders
+      if (hasNewOrders || JSON.stringify(recentOrders.map(o => o.id)) !== JSON.stringify(newOrders.map(o => o.id))) {
+        console.log(`[loadNewOrders] ✅ New orders detected! Updating UI with ${recentOrders.length} orders`);
+        setNewOrders(recentOrders);
+      } else {
+        console.log(`[loadNewOrders] No new orders since last check`);
+      }
       
       // Update last check time
       lastOrderCheckRef.current = new Date();
       
     } catch (error) {
-      // Silently handle errors - set empty array
-      setNewOrders([]);
+      // Log error but don't stop polling - continue trying
+      console.error('[loadNewOrders] Error fetching orders:', error);
+      // Don't clear existing orders on error - keep showing what we have
+      // setNewOrders([]); // Commented out to prevent clearing orders on temporary errors
     } finally {
       if (!isBackgroundPoll) {
         setOrdersLoading(false);
@@ -431,8 +443,7 @@ export default function DashboardScreen() {
                 key={order.id}
                 style={styles.orderCard}
                 onPress={() => {
-                  // Navigate to order details if route exists
-                  // router.push(`/orders/${order.id}` as Href);
+                  router.push(`/order-details?id=${order.id}`);
                 }}
               >
                 <View style={styles.orderCardLeft}>
