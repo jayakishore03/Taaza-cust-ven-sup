@@ -66,21 +66,20 @@ export default function OrderDetailsScreen() {
           onPress: async () => {
             try {
               setUpdating(true);
-              const updatedOrder = await updateOrderStatus(order.id, newStatus);
-              
-              // Immediately update the order state to hide the button
-              if (updatedOrder) {
-                setOrder(updatedOrder);
-              }
+              await updateOrderStatus(order.id, newStatus);
               
               // Reload order details to get the latest status from backend
+              // This ensures the order state is updated with the correct status
               await loadOrderDetails();
+              
+              // Ensure updating state is cleared
+              setUpdating(false);
+              
               Alert.alert('Success', 'Order status updated');
             } catch (error: any) {
               console.error('[OrderDetailsScreen] Error updating status:', error);
-              Alert.alert('Error', error.message || 'Failed to update order status');
-            } finally {
               setUpdating(false);
+              Alert.alert('Error', error.message || 'Failed to update order status');
             }
           },
         },
@@ -305,7 +304,11 @@ export default function OrderDetailsScreen() {
               </TouchableOpacity>
             ) : null}
             {(() => {
-              const statusLower = (order.status || '').toLowerCase();
+              const status = (order.status || '').trim();
+              const statusLower = status.toLowerCase();
+              
+              // Check if status is already "ready" - handle various formats
+              // Backend returns "Order Ready" so we check for that and variations
               const isReady = statusLower === 'ready' || 
                              statusLower === 'order ready' || 
                              statusLower.includes('ready');
@@ -315,19 +318,20 @@ export default function OrderDetailsScreen() {
                 return null;
               }
               
+              // Don't show button while updating
+              if (updating) {
+                return null;
+              }
+              
               return (
                 <TouchableOpacity
                   style={[styles.statusButton, styles.statusButtonPrimary]}
                   onPress={() => handleStatusUpdate('Order Ready')}
                   disabled={updating}
                 >
-                  {updating ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={[styles.statusButtonText, styles.statusButtonTextPrimary]}>
-                      Mark as Ready
-                    </Text>
-                  )}
+                  <Text style={[styles.statusButtonText, styles.statusButtonTextPrimary]}>
+                    Mark as Ready
+                  </Text>
                 </TouchableOpacity>
               );
             })()}
