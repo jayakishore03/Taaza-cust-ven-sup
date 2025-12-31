@@ -711,9 +711,16 @@ export const getDashboardStats = async (): Promise<DashboardStats | null> => {
     const orders = await getVendorOrders();
     
     const totalOrders = orders.length;
-    const pendingOrders = orders.filter(o => 
-      ['pending', 'confirmed', 'preparing'].includes(o.status?.toLowerCase())
-    ).length;
+    // Count pending orders - includes all active/not-completed statuses
+    const pendingOrders = orders.filter(o => {
+      const status = (o.status || '').toLowerCase();
+      return status.includes('pending') || 
+             status.includes('confirmed') || 
+             status.includes('preparing') ||
+             status.includes('order placed') ||
+             status.includes('order ready') ||
+             status.includes('out for delivery');
+    }).length;
     
     return {
       totalOrders,

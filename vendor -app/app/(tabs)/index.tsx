@@ -494,12 +494,18 @@ export default function DashboardScreen() {
               <Text style={[styles.statLabel, styles.primaryStatLabel]}>
                 Total Orders
               </Text>
+              <Text style={[styles.statCount, styles.primaryStatCount]}>
+                {stats.totalOrders === 1 ? '1 order' : `${stats.totalOrders} orders`}
+              </Text>
             </View>
 
             <View style={styles.statCard}>
               <Package size={24} color="#000" />
               <Text style={styles.statValue}>{stats.pendingOrders}</Text>
               <Text style={styles.statLabel}>Pending Orders</Text>
+              <Text style={styles.statCount}>
+                {stats.pendingOrders === 1 ? '1 pending' : `${stats.pendingOrders} pending`}
+              </Text>
             </View>
           </View>
           )}
@@ -787,6 +793,15 @@ const styles = StyleSheet.create({
   },
   primaryStatLabel: {
     color: '#fff',
+  },
+  statCount: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  primaryStatCount: {
+    color: 'rgba(255, 255, 255, 0.8)',
   },
   quickActions: {
     marginBottom: 32,
