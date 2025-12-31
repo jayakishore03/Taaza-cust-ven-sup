@@ -603,7 +603,11 @@ export const updateOrderStatus = async (
       throw new Error('Not authenticated');
     }
 
-    const response = await fetch(`${API_BASE_URL}/orders/${orderId}`, {
+    const url = `${API_BASE_URL}/vendor/orders/${orderId}/status`;
+    console.log(`[updateOrderStatus] Updating order ${orderId} to status: ${status}`);
+    console.log(`[updateOrderStatus] URL: ${url}`);
+
+    const response = await fetch(url, {
       method: 'PATCH',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -612,26 +616,53 @@ export const updateOrderStatus = async (
       body: JSON.stringify({ status }),
     });
 
+    console.log(`[updateOrderStatus] Response status: ${response.status}`);
+
     if (!response.ok) {
-      throw new Error('Failed to update order status');
+      let errorMessage = 'Failed to update order status';
+      let errorDetails = '';
+      
+      try {
+        const errorText = await response.text();
+        console.warn(`[updateOrderStatus] Error response: ${errorText}`);
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error?.message || errorMessage;
+          errorDetails = errorJson.error?.details || '';
+        } catch (e) {
+          // If not JSON, use the text as error message
+          errorMessage = errorText || errorMessage;
+        }
+      } catch (e) {
+        // If we can't read the response, use status code
+        errorMessage = `Failed to update order status (${response.status})`;
+      }
+      
+      console.error(`[updateOrderStatus] Error: ${errorMessage}`, errorDetails ? `Details: ${errorDetails}` : '');
+      throw new Error(errorMessage);
     }
 
     const result = await response.json();
+    console.log(`[updateOrderStatus] Success response:`, result);
     
     // If the response includes the updated order, return it
     // Otherwise, fetch the order again to get full details
     if (result.data) {
+      console.log(`[updateOrderStatus] ✅ Order updated successfully`);
       return result.data;
     } else {
+      console.log(`[updateOrderStatus] Response doesn't include order data, fetching...`);
       // Fetch updated order details
       const updatedOrder = await getVendorOrderById(orderId);
       if (updatedOrder) {
+        console.log(`[updateOrderStatus] ✅ Fetched updated order`);
         return updatedOrder;
       }
       throw new Error('Failed to get updated order');
     }
   } catch (error: any) {
-    console.error('Error updating order status:', error);
+    console.error('[updateOrderStatus] Exception:', error);
     throw error;
   }
 };

@@ -1006,6 +1006,235 @@ export const createOrder = async (req, res, next) => {
 };
 
 /**
+ * Update vendor order status
+ * PATCH /api/vendor/orders/:id/status
+ */
+export const updateVendorOrderStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId;
+    const { status, statusNote } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: { message: 'Authentication required' },
+      });
+    }
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Status is required' },
+      });
+    }
+
+    console.log('========================================');
+    console.log('🔄 UPDATE VENDOR ORDER STATUS REQUEST');
+    console.log('========================================');
+    console.log('Vendor User ID:', userId);
+    console.log('Order ID:', id);
+    console.log('New Status:', status);
+
+    // Find vendor's shop
+    let shopId = null;
+    
+    // Method 1: Find shop by user_id
+    const { data: shopsByUserId } = await supabase
+      .from('shops')
+      .select('id, name')
+      .eq('user_id', userId)
+      .limit(1);
+
+    if (shopsByUserId && shopsByUserId.length > 0) {
+      shopId = shopsByUserId[0].id;
+      console.log('✅ Found shop by user_id:', shopId);
+    } else {
+      // Method 2: Get vendor's email/phone from auth.users and find shop by email/phone
+      try {
+        const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+        if (authUser?.user) {
+          const vendorEmail = authUser.user.email;
+          const vendorPhone = authUser.user.phone;
+          
+          const { data: shopsByContact } = await supabase
+            .from('shops')
+            .select('id, name')
+            .or(`email.eq.${vendorEmail || ''},mobile_number.eq.${vendorPhone || ''},owner_phone.eq.${vendorPhone || ''}`)
+            .limit(1);
+          
+          if (shopsByContact && shopsByContact.length > 0) {
+            shopId = shopsByContact[0].id;
+            console.log('✅ Found shop by email/phone:', shopId);
+          }
+        }
+      } catch (err) {
+        console.log('⚠️  Could not get auth user info:', err.message);
+      }
+    }
+
+    if (!shopId) {
+      console.log('⚠️ No shop found for vendor');
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Shop not found for vendor' },
+      });
+    }
+
+    // Check if order exists and belongs to this shop
+    const orderResult = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', id)
+      .eq('shop_id', shopId)
+      .single();
+
+    if (!orderResult.data) {
+      console.log('⚠️ Order not found or does not belong to this shop');
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Order not found' },
+      });
+    }
+
+    const order = orderResult.data;
+    console.log('✅ Order found:', order.order_number);
+    console.log('Current Status:', order.status);
+
+    // Map status values (vendor sends "Ready", backend expects "Order Ready")
+    const statusMap = {
+      'Preparing': 'Preparing',
+      'Ready': 'Order Ready',
+      'Out for Delivery': 'Out for Delivery',
+      'Delivered': 'Delivered',
+      'Cancelled': 'Cancelled',
+    };
+
+    const mappedStatus = statusMap[status] || status;
+
+    // Validate status
+    const validStatuses = ['Preparing', 'Order Ready', 'Picked Up', 'Out for Delivery', 'Delivered', 'Cancelled'];
+    if (!validStatuses.includes(mappedStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Invalid status' },
+      });
+    }
+
+    const now = new Date().toISOString();
+
+    // Update order
+    const updateResult = await supabaseAdmin
+      .from('orders')
+      .update({
+        status: mappedStatus,
+        status_note: statusNote || null,
+        updated_at: now,
+        ...(mappedStatus === 'Delivered' && { delivered_at: now }),
+      })
+      .eq('id', id)
+      .eq('shop_id', shopId)
+      .select()
+      .single();
+
+    if (updateResult.error) {
+      console.error('❌ Error updating order:', updateResult.error);
+      return res.status(500).json({
+        success: false,
+        error: { message: 'Failed to update order status' },
+      });
+    }
+
+    console.log('✅ Order status updated to:', mappedStatus);
+
+    // Add timeline event
+    const stageDescriptions = {
+      'Preparing': 'Butcher is hand-cutting your order.',
+      'Order Ready': 'Fresh cuts are packed and ready for pickup.',
+      'Picked Up': 'Delivery partner has picked up your order.',
+      'Out for Delivery': 'Order is on the way to your doorstep.',
+      'Delivered': 'Enjoy your fresh order!',
+      'Cancelled': 'Amount will be refunded within 24 hours.',
+    };
+
+    const stage = mappedStatus === 'Order Ready' ? 'Order Ready' :
+                  mappedStatus === 'Picked Up' ? 'Picked Up' :
+                  mappedStatus === 'Out for Delivery' ? 'Out for Delivery' :
+                  mappedStatus === 'Delivered' ? 'Delivered' :
+                  mappedStatus === 'Cancelled' ? 'Order Cancelled' :
+                  'Order Placed';
+
+    await supabaseAdmin.from('order_timeline').insert({
+      order_id: id,
+      stage,
+      description: statusNote || stageDescriptions[mappedStatus] || '',
+      is_completed: mappedStatus !== 'Cancelled',
+      timestamp: now,
+    });
+
+    console.log('✅ Timeline event added');
+
+    // Fetch updated order with full details
+    const [itemsResult, timelineResult, addressResult] = await Promise.all([
+      supabase.from('order_items').select('*').eq('order_id', id),
+      supabase.from('order_timeline').select('*').eq('order_id', id).order('timestamp', { ascending: true }),
+      updateResult.data.address_id ? supabase.from('addresses').select('*').eq('id', updateResult.data.address_id).single() : Promise.resolve({ data: null }),
+    ]);
+
+    // Enrich order items with product details
+    const enrichedItems = await Promise.all(
+      (itemsResult.data || []).map(async (item) => {
+        if ((!item.image_url || item.image_url === '') && item.product_id) {
+          const productResult = await supabase
+            .from('products')
+            .select('image_url, name, weight, weight_in_kg, price_per_kg')
+            .eq('id', item.product_id)
+            .single();
+          
+          if (productResult.data) {
+            if (!item.image_url && productResult.data.image_url) {
+              item.image_url = productResult.data.image_url;
+            }
+            if (!item.name && productResult.data.name) {
+              item.name = productResult.data.name;
+            }
+            if (!item.weight && productResult.data.weight) {
+              item.weight = productResult.data.weight;
+            }
+            if (!item.weight_in_kg && productResult.data.weight_in_kg) {
+              item.weight_in_kg = productResult.data.weight_in_kg;
+            }
+            if (!item.price_per_kg && productResult.data.price_per_kg) {
+              item.price_per_kg = productResult.data.price_per_kg;
+            }
+          }
+        }
+        return item;
+      })
+    );
+
+    const formattedOrder = formatOrder(
+      updateResult.data,
+      enrichedItems,
+      timelineResult.data || [],
+      null, // shop (not needed for vendor)
+      addressResult.data,
+      req
+    );
+
+    console.log('✅ Order details formatted and returned');
+
+    res.json({
+      success: true,
+      data: formattedOrder,
+    });
+  } catch (error) {
+    console.error('❌ Error in updateVendorOrderStatus:', error);
+    next(error);
+  }
+};
+
+/**
  * Update order status
  * PATCH /api/orders/:id/status
  */

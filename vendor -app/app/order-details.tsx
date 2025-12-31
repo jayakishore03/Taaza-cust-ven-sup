@@ -131,10 +131,13 @@ export default function OrderDetailsScreen() {
   const getStatusColor = (status?: string) => {
     switch (status?.toLowerCase()) {
       case 'preparing':
+      case 'order placed':
         return '#FFA500';
       case 'ready':
+      case 'order ready':
         return '#4CAF50';
       case 'out for delivery':
+      case 'picked up':
         return '#2196F3';
       case 'delivered':
         return '#4CAF50';
@@ -190,19 +193,19 @@ export default function OrderDetailsScreen() {
           {order.items && order.items.length > 0 ? (
             order.items.map((item: any, index) => (
               <View key={item.id || index} style={styles.itemCard}>
-                {item.image && (
+                {item.image ? (
                   <Image source={{ uri: item.image }} style={styles.itemImage} />
-                )}
+                ) : null}
                 <View style={styles.itemDetails}>
                   <Text style={styles.itemName}>{item.name || 'Product'}</Text>
                   <Text style={styles.itemQuantity}>
                     Quantity: {item.quantity || 1}
-                    {item.weight && ` • ${item.weight}`}
-                    {item.weightInKg && ` (${item.weightInKg} kg)`}
+                    {item.weight ? ` • ${item.weight}` : ''}
+                    {item.weightInKg ? ` (${item.weightInKg} kg)` : ''}
                   </Text>
                   <Text style={styles.itemPrice}>
                     {item.price || item.pricePerKg || '₹0.00'}
-                    {item.pricePerKg && ` per kg`}
+                    {item.pricePerKg ? ' per kg' : ''}
                   </Text>
                 </View>
               </View>
@@ -220,18 +223,18 @@ export default function OrderDetailsScreen() {
               <MapPin size={20} color="#000" />
               <View style={styles.addressDetails}>
                 <Text style={styles.addressName}>{order.address.contactName || 'Customer'}</Text>
-                {order.address.phone && (
+                {order.address.phone ? (
                   <View style={styles.infoRow}>
                     <Phone size={14} color="#666" />
                     <Text style={styles.addressText}>{order.address.phone}</Text>
                   </View>
-                )}
+                ) : null}
                 <Text style={styles.addressText}>
-                  {order.address.street}
-                  {order.address.landmark && `, ${order.address.landmark}`}
+                  {order.address.street || ''}
+                  {order.address.landmark ? `, ${order.address.landmark}` : ''}
                 </Text>
                 <Text style={styles.addressText}>
-                  {order.address.city}, {order.address.state} {order.address.postalCode}
+                  {order.address.city || ''}, {order.address.state || ''} {order.address.postalCode || ''}
                 </Text>
               </View>
             </View>
@@ -247,18 +250,18 @@ export default function OrderDetailsScreen() {
               {formatPrice(order.subtotal || order.total_amount || 0)}
             </Text>
           </View>
-          {order.deliveryCharge && order.deliveryCharge > 0 && (
+          {order.deliveryCharge && order.deliveryCharge > 0 ? (
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Delivery Charge</Text>
               <Text style={styles.summaryValue}>{formatPrice(order.deliveryCharge)}</Text>
             </View>
-          )}
-          {order.discount && order.discount > 0 && (
+          ) : null}
+          {order.discount && order.discount > 0 ? (
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Discount</Text>
               <Text style={styles.summaryValue}>-{formatPrice(order.discount)}</Text>
             </View>
-          )}
+          ) : null}
           <View style={[styles.summaryRow, styles.totalRow]}>
             <Text style={styles.totalLabel}>Total</Text>
             <Text style={styles.totalValue}>
@@ -271,7 +274,7 @@ export default function OrderDetailsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Update Status</Text>
           <View style={styles.statusButtons}>
-            {order.status?.toLowerCase() !== 'preparing' && (
+            {order.status?.toLowerCase() !== 'preparing' && order.status?.toLowerCase() !== 'order placed' ? (
               <TouchableOpacity
                 style={[styles.statusButton, styles.statusButtonSecondary]}
                 onPress={() => handleStatusUpdate('Preparing')}
@@ -279,8 +282,8 @@ export default function OrderDetailsScreen() {
               >
                 <Text style={styles.statusButtonText}>Mark as Preparing</Text>
               </TouchableOpacity>
-            )}
-            {order.status?.toLowerCase() !== 'ready' && (
+            ) : null}
+            {order.status?.toLowerCase() !== 'ready' && order.status?.toLowerCase() !== 'order ready' ? (
               <TouchableOpacity
                 style={[styles.statusButton, styles.statusButtonPrimary]}
                 onPress={() => handleStatusUpdate('Ready')}
@@ -290,8 +293,8 @@ export default function OrderDetailsScreen() {
                   Mark as Ready
                 </Text>
               </TouchableOpacity>
-            )}
-            {order.status?.toLowerCase() !== 'out for delivery' && (
+            ) : null}
+            {order.status?.toLowerCase() !== 'out for delivery' && order.status?.toLowerCase() !== 'picked up' ? (
               <TouchableOpacity
                 style={[styles.statusButton, styles.statusButtonSecondary]}
                 onPress={() => handleStatusUpdate('Out for Delivery')}
@@ -299,8 +302,8 @@ export default function OrderDetailsScreen() {
               >
                 <Text style={styles.statusButtonText}>Out for Delivery</Text>
               </TouchableOpacity>
-            )}
-            {order.status?.toLowerCase() !== 'delivered' && (
+            ) : null}
+            {order.status?.toLowerCase() !== 'delivered' ? (
               <TouchableOpacity
                 style={[styles.statusButton, styles.statusButtonSuccess]}
                 onPress={() => handleStatusUpdate('Delivered')}
@@ -310,7 +313,7 @@ export default function OrderDetailsScreen() {
                   Mark as Delivered
                 </Text>
               </TouchableOpacity>
-            )}
+            ) : null}
           </View>
         </View>
       </ScrollView>
