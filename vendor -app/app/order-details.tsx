@@ -67,6 +67,12 @@ export default function OrderDetailsScreen() {
             try {
               setUpdating(true);
               const updatedOrder = await updateOrderStatus(order.id, newStatus);
+              
+              // Immediately update the order state to hide the button
+              if (updatedOrder) {
+                setOrder(updatedOrder);
+              }
+              
               // Reload order details to get the latest status from backend
               await loadOrderDetails();
               Alert.alert('Success', 'Order status updated');
@@ -298,23 +304,33 @@ export default function OrderDetailsScreen() {
                 <Text style={styles.statusButtonText}>Mark as Preparing</Text>
               </TouchableOpacity>
             ) : null}
-            {order.status?.toLowerCase() !== 'ready' && 
-             order.status?.toLowerCase() !== 'order ready' &&
-             !order.status?.toLowerCase().includes('ready') ? (
-              <TouchableOpacity
-                style={[styles.statusButton, styles.statusButtonPrimary]}
-                onPress={() => handleStatusUpdate('Order Ready')}
-                disabled={updating}
-              >
-                {updating ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={[styles.statusButtonText, styles.statusButtonTextPrimary]}>
-                    Mark as Ready
-                  </Text>
-                )}
-              </TouchableOpacity>
-            ) : null}
+            {(() => {
+              const statusLower = (order.status || '').toLowerCase();
+              const isReady = statusLower === 'ready' || 
+                             statusLower === 'order ready' || 
+                             statusLower.includes('ready');
+              
+              // Hide button if status is already "ready"
+              if (isReady) {
+                return null;
+              }
+              
+              return (
+                <TouchableOpacity
+                  style={[styles.statusButton, styles.statusButtonPrimary]}
+                  onPress={() => handleStatusUpdate('Order Ready')}
+                  disabled={updating}
+                >
+                  {updating ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={[styles.statusButtonText, styles.statusButtonTextPrimary]}>
+                      Mark as Ready
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })()}
             {order.status?.toLowerCase() !== 'out for delivery' && order.status?.toLowerCase() !== 'picked up' ? (
               <TouchableOpacity
                 style={[styles.statusButton, styles.statusButtonSecondary]}
