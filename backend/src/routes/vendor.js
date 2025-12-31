@@ -3,7 +3,7 @@
  */
 
 import express from 'express';
-import { registerVendor, getVendorProfile, approveVendor } from '../controllers/vendorController.js';
+import { registerVendor, getVendorProfile, approveVendor, updateShopStatus } from '../controllers/vendorController.js';
 import { getVendorOrders, getVendorOrderById, updateVendorOrderStatus } from '../controllers/ordersController.js';
 import { authenticate } from '../middleware/auth.js';
 
@@ -14,6 +14,9 @@ router.post('/register', registerVendor);
 
 // Get vendor profile (requires authentication)
 router.get('/profile', authenticate, getVendorProfile);
+
+// Update shop open/close status (requires authentication)
+router.patch('/shop/status', authenticate, updateShopStatus);
 
 // Get vendor orders (requires authentication)
 router.get('/orders', authenticate, getVendorOrders);

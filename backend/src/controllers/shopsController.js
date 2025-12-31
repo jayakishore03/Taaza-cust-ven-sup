@@ -149,13 +149,14 @@ export const getAllShops = async (req, res, next) => {
     const userLat = req.query.lat ? parseFloat(req.query.lat) : null;
     const userLon = req.query.lon ? parseFloat(req.query.lon) : null;
 
-    // Fetch shops - only show approved shops (is_approved = true)
+    // Fetch shops - only show approved shops (is_approved = true) that are open (is_open = true)
     // All vendor registration data is stored directly in shops table (no vendors table)
     const { data: shopsData, error: shopsError } = await supabase
       .from('shops')
       .select('*')
       .eq('is_active', true)
       .eq('is_approved', true) // Only show approved shops
+      .eq('is_open', true) // Only show shops that are open (vendor has toggled on)
       .order('created_at', { ascending: false });
 
     if (shopsError) {

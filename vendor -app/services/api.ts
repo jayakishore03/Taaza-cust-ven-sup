@@ -932,3 +932,99 @@ export const getVendorProfile = async (): Promise<{ success: boolean; data?: { u
     return { success: false };
   }
 };
+
+// Update shop open/close status
+export const updateShopStatus = async (isOpen: boolean): Promise<{ success: boolean; data?: { shop: any; message: string }; error?: { message: string } }> => {
+  try {
+    // Try to get token from backend auth first
+    let token = await getAuthToken();
+    
+    // If no backend token, try to get Supabase session token
+    if (!token) {
+      try {
+        const { supabase } = await import('../lib/supabase');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          token = session.access_token;
+        }
+      } catch (supabaseError) {
+        // Silently fail - no token available
+      }
+    }
+
+    if (!token) {
+      return {
+        success: false,
+        error: { message: 'Not authenticated' },
+      };
+    }
+
+    const url = `${API_BASE_URL}/vendor/shop/status`;
+    console.log(`[updateShopStatus] Updating shop status to: ${isOpen ? 'OPEN' : 'CLOSED'}`);
+    console.log(`[updateShopStatus] URL: ${url}`);
+
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ is_open: isOpen }),
+    });
+
+    console.log(`[updateShopStatus] Response status: ${response.status}`);
+
+    if (!response.ok) {
+      let errorMessage = 'Failed to update shop status';
+      let errorDetails = '';
+      
+      try {
+        const errorText = await response.text();
+        console.warn(`[updateShopStatus] Error response: ${errorText}`);
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error?.message || errorMessage;
+          errorDetails = errorJson.error?.details || '';
+        } catch (e) {
+          // If not JSON, use the text as error message
+          errorMessage = errorText || errorMessage;
+        }
+      } catch (e) {
+        // If we can't read the response, use status code
+        errorMessage = `Failed to update shop status (${response.status})`;
+      }
+      
+      console.error(`[updateShopStatus] Error: ${errorMessage}`, errorDetails ? `Details: ${errorDetails}` : '');
+      return {
+        success: false,
+        error: { message: errorMessage },
+      };
+    }
+
+    const result = await response.json();
+    console.log(`[updateShopStatus] Success response:`, result);
+
+    if (result.success && result.data) {
+      // Update cached vendor data with new shop status
+      try {
+        const vendorDataStr = await AsyncStorage.getItem('vendor_data');
+        if (vendorDataStr) {
+          const vendorData = JSON.parse(vendorDataStr);
+          vendorData.shop = { ...vendorData.shop, ...result.data.shop };
+          await AsyncStorage.setItem('vendor_data', JSON.stringify(vendorData));
+        }
+      } catch (error) {
+        // Non-blocking: ignore storage errors
+      }
+    }
+
+    return result;
+  } catch (error: any) {
+    console.error('[updateShopStatus] Exception:', error);
+    return {
+      success: false,
+      error: { message: error.message || 'Failed to update shop status' },
+    };
+  }
+};

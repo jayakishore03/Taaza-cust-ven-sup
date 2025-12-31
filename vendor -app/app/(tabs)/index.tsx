@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, Href } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '@/contexts/AuthContext';
-import { getDashboardStats, DashboardStats, getVendorOrders, Order } from '@/services/api';
+import { getDashboardStats, DashboardStats, getVendorOrders, Order, getVendorProfile, updateShopStatus } from '@/services/api';
 
 import {
   LogOut,
@@ -44,6 +44,8 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [newOrders, setNewOrders] = useState<Order[]>([]);
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
+  const [allOrdersLoading, setAllOrdersLoading] = useState(false);
   const [shopName, setShopName] = useState<string | undefined>(undefined);
   const [isOpen, setIsOpen] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -53,6 +55,7 @@ export default function DashboardScreen() {
   useEffect(() => {
     loadDashboardData();
     loadNewOrders();
+    loadAllOrders();
     
     // Start polling for new orders every 10 seconds
     startPolling();
@@ -70,6 +73,7 @@ export default function DashboardScreen() {
     React.useCallback(() => {
       // Refresh immediately when screen comes into focus
       loadNewOrders();
+      loadAllOrders();
       loadDashboardData();
       
       // Restart polling
@@ -84,6 +88,28 @@ export default function DashboardScreen() {
       };
     }, [])
   );
+
+  // Function to update a specific order in the list
+  const updateOrderInList = (updatedOrder: Order) => {
+    setNewOrders(prevOrders => {
+      const orderIndex = prevOrders.findIndex(o => o.id === updatedOrder.id);
+      if (orderIndex !== -1) {
+        // Update the specific order
+        const updatedOrders = [...prevOrders];
+        updatedOrders[orderIndex] = updatedOrder;
+        console.log(`[updateOrderInList] Updated order ${updatedOrder.id} status to ${updatedOrder.status}`);
+        return updatedOrders;
+      }
+      // If order not in list, check if it should be added (based on status)
+      const status = updatedOrder.status?.toLowerCase() || '';
+      const isActiveStatus = status.includes('preparing') || status.includes('ready') || status.includes('pending') || status.includes('confirmed');
+      if (isActiveStatus) {
+        // Add to list if it's an active status
+        return [updatedOrder, ...prevOrders].slice(0, 5);
+      }
+      return prevOrders;
+    });
+  };
 
   const startPolling = () => {
     // Clear existing interval if any
@@ -109,9 +135,9 @@ export default function DashboardScreen() {
     setRefreshing(false);
   };
 
-  // Load cached vendor/shop name for header
+  // Load cached vendor/shop name and shop status for header
   useEffect(() => {
-    const loadVendorName = async () => {
+    const loadVendorData = async () => {
       const extractName = (data: any) =>
         data?.shop?.storeName ||
         data?.shop?.name ||
@@ -127,7 +153,10 @@ export default function DashboardScreen() {
           const nameFromData = extractName(vendorData);
           if (nameFromData) {
             setShopName(nameFromData);
-            return;
+          }
+          // Load shop is_open status from cached data
+          if (vendorData?.shop?.is_open !== undefined) {
+            setIsOpen(vendorData.shop.is_open);
           }
         }
       } catch {
@@ -141,12 +170,15 @@ export default function DashboardScreen() {
 
       // Fetch fresh profile and persist for future loads
       try {
-        const { getVendorProfile } = await import('@/services/api');
         const profile = await getVendorProfile();
         if (profile?.data) {
           const nameFromProfile = extractName(profile.data);
           if (nameFromProfile) {
             setShopName(nameFromProfile);
+          }
+          // Load shop is_open status from fresh profile
+          if (profile.data?.shop?.is_open !== undefined) {
+            setIsOpen(profile.data.shop.is_open);
           }
           // cache latest vendor data
           await AsyncStorage.setItem('vendor_data', JSON.stringify(profile.data));
@@ -156,7 +188,7 @@ export default function DashboardScreen() {
       }
     };
 
-    loadVendorName();
+    loadVendorData();
   }, [user]);
 
   const loadDashboardData = async () => {
@@ -276,6 +308,41 @@ export default function DashboardScreen() {
     }
   };
 
+  const loadAllOrders = async () => {
+    try {
+      setAllOrdersLoading(true);
+      
+      console.log('[loadAllOrders] Fetching all orders...');
+      const orders = await getVendorOrders();
+      
+      console.log(`[loadAllOrders] Fetched ${orders?.length || 0} total orders`);
+      
+      if (!orders || orders.length === 0) {
+        setAllOrders([]);
+        return;
+      }
+      
+      // Sort all orders by newest first
+      const sortedOrders = orders
+        .sort((a, b) => {
+          try {
+            const dateA = new Date(a.created_at || a.placedOn || 0).getTime();
+            const dateB = new Date(b.created_at || b.placedOn || 0).getTime();
+            return dateB - dateA;
+          } catch {
+            return 0;
+          }
+        });
+      
+      setAllOrders(sortedOrders);
+    } catch (error) {
+      console.error('[loadAllOrders] Error fetching all orders:', error);
+      setAllOrders([]);
+    } finally {
+      setAllOrdersLoading(false);
+    }
+  };
+
   const formatTimeAgo = (dateString: string): string => {
     const now = new Date();
     const date = new Date(dateString);
@@ -352,7 +419,46 @@ export default function DashboardScreen() {
           </Text>
           <Switch
             value={isOpen}
-            onValueChange={setIsOpen}
+            onValueChange={async (newValue) => {
+              // Update local state immediately for responsive UI
+              setIsOpen(newValue);
+              
+              // Save to backend
+              try {
+                const result = await updateShopStatus(newValue);
+                if (result.success) {
+                  console.log(`✅ Shop status updated to: ${newValue ? 'OPEN' : 'CLOSED'}`);
+                  // Update cached vendor data
+                  try {
+                    const vendorDataStr = await AsyncStorage.getItem('vendor_data');
+                    if (vendorDataStr) {
+                      const vendorData = JSON.parse(vendorDataStr);
+                      vendorData.shop = { ...vendorData.shop, is_open: newValue };
+                      await AsyncStorage.setItem('vendor_data', JSON.stringify(vendorData));
+                    }
+                  } catch (error) {
+                    // Non-blocking: ignore storage errors
+                  }
+                } else {
+                  // Revert on error
+                  setIsOpen(!newValue);
+                  Alert.alert(
+                    'Failed to Update Status',
+                    result.error?.message || 'Could not update shop status. Please try again.',
+                    [{ text: 'OK' }]
+                  );
+                }
+              } catch (error: any) {
+                // Revert on error
+                setIsOpen(!newValue);
+                console.error('Error updating shop status:', error);
+                Alert.alert(
+                  'Error',
+                  error.message || 'Failed to update shop status. Please check your connection and try again.',
+                  [{ text: 'OK' }]
+                );
+              }
+            }}
             thumbColor={isOpen ? '#111111' : '#f4f3f4'}
             trackColor={{ true: '#c7ffd9', false: '#ffd6d6' }}
           />
@@ -416,8 +522,7 @@ export default function DashboardScreen() {
             {newOrders.length > 0 && (
               <TouchableOpacity
                 onPress={() => {
-                  // Navigate to orders list if exists
-                  router.push('/(tabs)/index' as Href);
+                  router.push('/all-orders');
                 }}
               >
                 <Text style={styles.viewAllText}>View All</Text>
@@ -484,35 +589,78 @@ export default function DashboardScreen() {
           )}
         </View>
 
-        {/* Quick Actions */}
-        <View style={styles.quickActions}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
+        {/* All Orders */}
+        <View style={styles.allOrdersSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>All Orders</Text>
+            {allOrders.length > 0 && (
+              <TouchableOpacity
+                onPress={() => {
+                  router.push('/all-orders');
+                }}
+              >
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => router.push('/documents' as Href)}
-          >
-            <FileText size={24} color="#000" />
-            <View style={styles.actionContent}>
-              <Text style={styles.actionTitle}>Uploaded Documents</Text>
-              <Text style={styles.actionSubtitle}>
-                View and manage your uploaded business documents
+          {allOrdersLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color="#000" />
+            </View>
+          ) : allOrders.length === 0 ? (
+            <View style={styles.emptyOrdersContainer}>
+              <Package size={32} color="#999" />
+              <Text style={styles.emptyOrdersText}>No orders found</Text>
+              <Text style={styles.emptyOrdersSubtext}>
+                Orders from customers will appear here
               </Text>
             </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => router.push('/banking' as Href)}
-          >
-            <CreditCard size={24} color="#000" />
-            <View style={styles.actionContent}>
-              <Text style={styles.actionTitle}>Banking Information</Text>
-              <Text style={styles.actionSubtitle}>
-                Manage payment and banking details
-              </Text>
-            </View>
-          </TouchableOpacity>
+          ) : (
+            allOrders.slice(0, 10).map((order) => (
+              <TouchableOpacity
+                key={order.id}
+                style={styles.orderCard}
+                onPress={() => {
+                  router.push(`/order-details?id=${order.id}`);
+                }}
+              >
+                <View style={styles.orderCardLeft}>
+                  <View style={styles.orderIconContainer}>
+                    <Package size={20} color="#000" />
+                  </View>
+                  <View style={styles.orderInfo}>
+                    <Text style={styles.orderNumber}>
+                      {order.orderNumber || `Order #${order.id.slice(0, 8)}`}
+                    </Text>
+                    <Text style={styles.orderTotal}>
+                      {order.total || 
+                        (order.total_amount 
+                          ? `₹${order.total_amount.toFixed(2)}` 
+                          : '₹0.00')}
+                    </Text>
+                    <View style={styles.orderMeta}>
+                      <Clock size={12} color="#666" />
+                      <Text style={styles.orderTime}>
+                        {formatTimeAgo(order.created_at || order.placedOn || new Date().toISOString())}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+                <View style={styles.orderCardRight}>
+                  <View style={[
+                    styles.statusBadge,
+                    { backgroundColor: getStatusColor(order.status) }
+                  ]}>
+                    <Text style={styles.statusText}>
+                      {order.status || 'Preparing'}
+                    </Text>
+                  </View>
+                  <ArrowRight size={20} color="#999" />
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -679,6 +827,9 @@ const styles = StyleSheet.create({
   },
   newOrdersSection: {
     marginBottom: 8,
+  },
+  allOrdersSection: {
+    marginBottom: 32,
   },
   sectionHeader: {
     flexDirection: 'row',

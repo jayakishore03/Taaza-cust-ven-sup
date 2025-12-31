@@ -341,12 +341,30 @@ export const getVendorProfile = async (req, res, next) => {
       });
     }
 
-    // Get shop info (find shop by owner phone or email)
-    const { data: shops, error: shopError } = await supabase
+    // Get shop info (find shop by user_id first, then fallback to owner phone or email)
+    let shops = null;
+    let shopError = null;
+    
+    // Try to find shop by user_id first (preferred method)
+    const { data: shopsByUserId, error: shopErrorByUserId } = await supabase
       .from('shops')
       .select('*')
-      .or(`owner_phone.eq.${user.phone},contact_email.eq.${user.email}`)
+      .eq('user_id', userId)
       .limit(1);
+    
+    if (!shopErrorByUserId && shopsByUserId && shopsByUserId.length > 0) {
+      shops = shopsByUserId;
+    } else {
+      // Fallback to finding by owner phone or email
+      const { data: shopsByContact, error: shopErrorByContact } = await supabase
+        .from('shops')
+        .select('*')
+        .or(`owner_phone.eq.${user.phone},contact_email.eq.${user.email}`)
+        .limit(1);
+      
+      shops = shopsByContact;
+      shopError = shopErrorByContact;
+    }
 
     const shop = shops && shops.length > 0 ? shops[0] : null;
 
@@ -359,6 +377,78 @@ export const getVendorProfile = async (req, res, next) => {
     });
   } catch (error) {
     console.error('Get vendor profile error:', error);
+    next(error);
+  }
+};
+
+/**
+ * Update shop open/close status (Vendor only)
+ * PATCH /api/vendor/shop/status
+ * Allows vendors to toggle their shop's visibility in customer app
+ */
+export const updateShopStatus = async (req, res, next) => {
+  try {
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: { message: 'Not authenticated' },
+      });
+    }
+
+    const { is_open } = req.body;
+
+    if (typeof is_open !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'is_open must be a boolean value' },
+      });
+    }
+
+    // Find shop by user_id
+    const { data: shops, error: shopError } = await supabase
+      .from('shops')
+      .select('id, name, is_open')
+      .eq('user_id', userId)
+      .limit(1);
+
+    if (shopError || !shops || shops.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Shop not found for this vendor' },
+      });
+    }
+
+    const shop = shops[0];
+
+    // Update shop is_open status
+    const { data: updatedShop, error: updateError } = await supabase
+      .from('shops')
+      .update({ is_open })
+      .eq('id', shop.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('[updateShopStatus] Error updating shop:', updateError);
+      return res.status(500).json({
+        success: false,
+        error: { message: 'Failed to update shop status' },
+      });
+    }
+
+    console.log(`[updateShopStatus] ✅ Shop ${shop.id} status updated to: ${is_open ? 'OPEN' : 'CLOSED'}`);
+
+    return res.json({
+      success: true,
+      data: {
+        shop: updatedShop,
+        message: `Shop is now ${is_open ? 'open' : 'closed'}`,
+      },
+    });
+  } catch (error) {
+    console.error('[updateShopStatus] Exception:', error);
     next(error);
   }
 };
