@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { ArrowLeft, Package, MapPin, Clock, Phone, User, CreditCard } from 'lucide-react-native';
 import { getVendorOrderById, updateOrderStatus, Order } from '../services/api';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
@@ -27,6 +28,15 @@ export default function OrderDetailsScreen() {
   useEffect(() => {
     loadOrderDetails();
   }, [id]);
+
+  // Reload order details when screen comes into focus (in case status was updated elsewhere)
+  useFocusEffect(
+    useCallback(() => {
+      if (id) {
+        loadOrderDetails();
+      }
+    }, [id])
+  );
 
   const loadOrderDetails = async () => {
     if (!id) return;
@@ -57,7 +67,8 @@ export default function OrderDetailsScreen() {
             try {
               setUpdating(true);
               const updatedOrder = await updateOrderStatus(order.id, newStatus);
-              setOrder(updatedOrder);
+              // Reload order details to get the latest status from backend
+              await loadOrderDetails();
               Alert.alert('Success', 'Order status updated');
             } catch (error: any) {
               console.error('[OrderDetailsScreen] Error updating status:', error);
@@ -159,7 +170,11 @@ export default function OrderDetailsScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Order Header */}
         <View style={styles.orderHeader}>
           <View style={styles.orderNumberContainer}>
@@ -283,15 +298,21 @@ export default function OrderDetailsScreen() {
                 <Text style={styles.statusButtonText}>Mark as Preparing</Text>
               </TouchableOpacity>
             ) : null}
-            {order.status?.toLowerCase() !== 'ready' && order.status?.toLowerCase() !== 'order ready' ? (
+            {order.status?.toLowerCase() !== 'ready' && 
+             order.status?.toLowerCase() !== 'order ready' &&
+             !order.status?.toLowerCase().includes('ready') ? (
               <TouchableOpacity
                 style={[styles.statusButton, styles.statusButtonPrimary]}
-                onPress={() => handleStatusUpdate('Ready')}
+                onPress={() => handleStatusUpdate('Order Ready')}
                 disabled={updating}
               >
-                <Text style={[styles.statusButtonText, styles.statusButtonTextPrimary]}>
-                  Mark as Ready
-                </Text>
+                {updating ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={[styles.statusButtonText, styles.statusButtonTextPrimary]}>
+                    Mark as Ready
+                  </Text>
+                )}
               </TouchableOpacity>
             ) : null}
             {order.status?.toLowerCase() !== 'out for delivery' && order.status?.toLowerCase() !== 'picked up' ? (
@@ -301,17 +322,6 @@ export default function OrderDetailsScreen() {
                 disabled={updating}
               >
                 <Text style={styles.statusButtonText}>Out for Delivery</Text>
-              </TouchableOpacity>
-            ) : null}
-            {order.status?.toLowerCase() !== 'delivered' ? (
-              <TouchableOpacity
-                style={[styles.statusButton, styles.statusButtonSuccess]}
-                onPress={() => handleStatusUpdate('Delivered')}
-                disabled={updating}
-              >
-                <Text style={[styles.statusButtonText, styles.statusButtonTextWhite]}>
-                  Mark as Delivered
-                </Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -346,6 +356,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100,
   },
   loadingContainer: {
     flex: 1,
