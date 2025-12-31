@@ -25,21 +25,23 @@ export default function OrderDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [hasUpdatedToReady, setHasUpdatedToReady] = useState(false);
+  const [hasUpdatedToPreparing, setHasUpdatedToPreparing] = useState(false);
 
   useEffect(() => {
-    // Reset the flag when order ID changes
+    // Reset the flags when order ID changes
     setHasUpdatedToReady(false);
+    setHasUpdatedToPreparing(false);
     loadOrderDetails();
   }, [id]);
 
   // Reload order details when screen comes into focus (in case status was updated elsewhere)
-  // But skip if we just updated to ready to prevent button from reappearing
+  // But skip if we just updated to prevent buttons from reappearing
   useFocusEffect(
     useCallback(() => {
-      if (id && !hasUpdatedToReady) {
+      if (id && !hasUpdatedToReady && !hasUpdatedToPreparing) {
         loadOrderDetails();
       }
-    }, [id, hasUpdatedToReady])
+    }, [id, hasUpdatedToReady, hasUpdatedToPreparing])
   );
 
   const loadOrderDetails = async () => {
@@ -72,9 +74,11 @@ export default function OrderDetailsScreen() {
               setUpdating(true);
               const updatedOrder = await updateOrderStatus(order.id, newStatus);
               
-              // If updating to "Order Ready", mark that we've updated
+              // Mark that we've updated based on the status
               if (newStatus === 'Order Ready' || newStatus.toLowerCase().includes('ready')) {
                 setHasUpdatedToReady(true);
+              } else if (newStatus === 'Preparing' || newStatus.toLowerCase().includes('preparing')) {
+                setHasUpdatedToPreparing(true);
               }
               
               // Immediately update the order state with the updated order
@@ -93,6 +97,7 @@ export default function OrderDetailsScreen() {
               console.error('[OrderDetailsScreen] Error updating status:', error);
               setUpdating(false);
               setHasUpdatedToReady(false); // Reset on error
+              setHasUpdatedToPreparing(false); // Reset on error
               Alert.alert('Error', error.message || 'Failed to update order status');
             }
           },
@@ -308,15 +313,35 @@ export default function OrderDetailsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Update Status</Text>
           <View style={styles.statusButtons}>
-            {order.status?.toLowerCase() !== 'preparing' && order.status?.toLowerCase() !== 'order placed' ? (
-              <TouchableOpacity
-                style={[styles.statusButton, styles.statusButtonSecondary]}
-                onPress={() => handleStatusUpdate('Preparing')}
-                disabled={updating}
-              >
-                <Text style={styles.statusButtonText}>Mark as Preparing</Text>
-              </TouchableOpacity>
-            ) : null}
+            {(() => {
+              const status = (order.status || '').trim();
+              const statusLower = status.toLowerCase();
+              
+              // Check if status is already "preparing" - handle various formats
+              const isPreparing = statusLower === 'preparing' || 
+                                 statusLower.includes('preparing');
+              const isOrderPlaced = statusLower === 'order placed' || 
+                                   statusLower.includes('order placed');
+              
+              // Hide button if:
+              // 1. Status is already "preparing" (original logic)
+              // 2. Status is "order placed" (original logic - button only shows for other statuses)
+              // 3. We've already updated to preparing (prevents reappearing)
+              // 4. Currently updating
+              if (isPreparing || isOrderPlaced || hasUpdatedToPreparing || updating) {
+                return null;
+              }
+              
+              return (
+                <TouchableOpacity
+                  style={[styles.statusButton, styles.statusButtonSecondary]}
+                  onPress={() => handleStatusUpdate('Preparing')}
+                  disabled={updating}
+                >
+                  <Text style={styles.statusButtonText}>Mark as Preparing</Text>
+                </TouchableOpacity>
+              );
+            })()}
             {(() => {
               const status = (order.status || '').trim();
               const statusLower = status.toLowerCase();
