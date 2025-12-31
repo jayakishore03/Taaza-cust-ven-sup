@@ -24,18 +24,22 @@ export default function OrderDetailsScreen() {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [hasUpdatedToReady, setHasUpdatedToReady] = useState(false);
 
   useEffect(() => {
+    // Reset the flag when order ID changes
+    setHasUpdatedToReady(false);
     loadOrderDetails();
   }, [id]);
 
   // Reload order details when screen comes into focus (in case status was updated elsewhere)
+  // But skip if we just updated to ready to prevent button from reappearing
   useFocusEffect(
     useCallback(() => {
-      if (id) {
+      if (id && !hasUpdatedToReady) {
         loadOrderDetails();
       }
-    }, [id])
+    }, [id, hasUpdatedToReady])
   );
 
   const loadOrderDetails = async () => {
@@ -66,11 +70,20 @@ export default function OrderDetailsScreen() {
           onPress: async () => {
             try {
               setUpdating(true);
-              await updateOrderStatus(order.id, newStatus);
+              const updatedOrder = await updateOrderStatus(order.id, newStatus);
               
-              // Reload order details to get the latest status from backend
-              // This ensures the order state is updated with the correct status
-              await loadOrderDetails();
+              // If updating to "Order Ready", mark that we've updated
+              if (newStatus === 'Order Ready' || newStatus.toLowerCase().includes('ready')) {
+                setHasUpdatedToReady(true);
+              }
+              
+              // Immediately update the order state with the updated order
+              if (updatedOrder) {
+                setOrder(updatedOrder);
+              } else {
+                // If updatedOrder is not returned, reload from backend
+                await loadOrderDetails();
+              }
               
               // Ensure updating state is cleared
               setUpdating(false);
@@ -79,6 +92,7 @@ export default function OrderDetailsScreen() {
             } catch (error: any) {
               console.error('[OrderDetailsScreen] Error updating status:', error);
               setUpdating(false);
+              setHasUpdatedToReady(false); // Reset on error
               Alert.alert('Error', error.message || 'Failed to update order status');
             }
           },
@@ -313,13 +327,11 @@ export default function OrderDetailsScreen() {
                              statusLower === 'order ready' || 
                              statusLower.includes('ready');
               
-              // Hide button if status is already "ready"
-              if (isReady) {
-                return null;
-              }
-              
-              // Don't show button while updating
-              if (updating) {
+              // Hide button if:
+              // 1. Status is already "ready"
+              // 2. We've already updated to ready (prevents reappearing)
+              // 3. Currently updating
+              if (isReady || hasUpdatedToReady || updating) {
                 return null;
               }
               
