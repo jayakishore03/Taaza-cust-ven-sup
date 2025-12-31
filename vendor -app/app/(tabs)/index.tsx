@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, Href } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '@/contexts/AuthContext';
-import { getDashboardStats, DashboardStats, getVendorOrders, Order, getVendorProfile, updateShopStatus } from '@/services/api';
+import { DashboardStats, getVendorOrders, Order, getVendorProfile, updateShopStatus } from '@/services/api';
 
 import {
   LogOut,
@@ -39,7 +39,6 @@ export default function DashboardScreen() {
     totalOrders: 0,
     pendingOrders: 0,
   });
-  const [loading, setLoading] = useState(true);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [newOrders, setNewOrders] = useState<Order[]>([]);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
@@ -51,7 +50,6 @@ export default function DashboardScreen() {
   const lastOrderCheckRef = useRef<Date>(new Date());
 
   useEffect(() => {
-    loadDashboardData();
     loadNewOrders();
     loadAllOrders();
     
@@ -72,7 +70,6 @@ export default function DashboardScreen() {
       // Refresh immediately when screen comes into focus
       loadNewOrders();
       loadAllOrders();
-      loadDashboardData();
       
       // Restart polling
       startPolling();
@@ -127,8 +124,8 @@ export default function DashboardScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([
-      loadDashboardData(),
       loadNewOrders(),
+      loadAllOrders(),
     ]);
     setRefreshing(false);
   };
@@ -189,19 +186,32 @@ export default function DashboardScreen() {
     loadVendorData();
   }, [user]);
 
-  const loadDashboardData = async () => {
-    try {
-      setLoading(true);
-      const dashboardStats = await getDashboardStats();
-      if (dashboardStats) {
-        setStats(dashboardStats);
-      }
-    } catch (error) {
-      console.error('Error loading dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
+  // Calculate stats from allOrders state (ensures counts match displayed orders)
+  const calculateStats = (orders: Order[]) => {
+    const totalOrders = orders.length;
+    const pendingOrders = orders.filter(o => {
+      const status = (o.status || '').toLowerCase();
+      return status.includes('pending') || 
+             status.includes('confirmed') || 
+             status.includes('preparing') ||
+             status.includes('order placed') ||
+             status.includes('order ready') ||
+             status.includes('out for delivery');
+    }).length;
+    
+    return {
+      totalOrders,
+      pendingOrders,
+    };
   };
+
+  // Update stats whenever allOrders changes
+  useEffect(() => {
+    if (!allOrdersLoading) {
+      const newStats = calculateStats(allOrders);
+      setStats(newStats);
+    }
+  }, [allOrders, allOrdersLoading]);
 
   const loadNewOrders = async (isBackgroundPoll = false) => {
     try {
@@ -480,7 +490,7 @@ export default function DashboardScreen() {
         <View style={styles.statsContainer}>
           <Text style={styles.sectionTitle}>Business Overview</Text>
 
-          {loading ? (
+          {allOrdersLoading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#000" />
             </View>
