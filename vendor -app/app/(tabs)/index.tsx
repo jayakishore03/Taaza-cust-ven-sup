@@ -23,7 +23,6 @@ import {
   LogOut,
   Bell,
   TrendingUp,
-  DollarSign,
   Package,
   MapPin,
   FileText,
@@ -38,7 +37,6 @@ export default function DashboardScreen() {
   const { signOut, user } = useAuth();
   const [stats, setStats] = useState<DashboardStats>({
     totalOrders: 0,
-    monthlyRevenue: 0,
     pendingOrders: 0,
   });
   const [loading, setLoading] = useState(true);
@@ -496,14 +494,6 @@ export default function DashboardScreen() {
               <Text style={[styles.statLabel, styles.primaryStatLabel]}>
                 Total Orders
               </Text>
-            </View>
-
-            <View style={styles.statCard}>
-              <DollarSign size={24} color="#000" />
-              <Text style={styles.statValue}>
-                ₹{stats.monthlyRevenue.toLocaleString()}
-              </Text>
-              <Text style={styles.statLabel}>Monthly Revenue</Text>
             </View>
 
             <View style={styles.statCard}>

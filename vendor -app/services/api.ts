@@ -695,7 +695,6 @@ export const getShopById = async (shopId: string): Promise<Shop | null> => {
 
 export interface DashboardStats {
   totalOrders: number;
-  monthlyRevenue: number;
   pendingOrders: number;
 }
 
@@ -715,18 +714,9 @@ export const getDashboardStats = async (): Promise<DashboardStats | null> => {
     const pendingOrders = orders.filter(o => 
       ['pending', 'confirmed', 'preparing'].includes(o.status?.toLowerCase())
     ).length;
-    const monthlyRevenue = orders
-      .filter(o => {
-        const orderDate = new Date(o.created_at);
-        const now = new Date();
-        return orderDate.getMonth() === now.getMonth() && 
-               orderDate.getFullYear() === now.getFullYear();
-      })
-      .reduce((sum, o) => sum + (o.total_amount || 0), 0);
     
     return {
       totalOrders,
-      monthlyRevenue,
       pendingOrders,
     };
   } catch (error) {
