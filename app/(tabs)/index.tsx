@@ -1,8 +1,9 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, ActivityIndicator, TextInput, RefreshControl } from 'react-native';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { MapPin, RefreshCw, Search, X } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import {
   getImageSource,
@@ -195,67 +196,69 @@ export default function HomeScreen() {
     }
   };
 
+  // Function to fetch shops (reusable)
+  const fetchShops = async (withCoordinates = false) => {
+    try {
+      setIsLoadingShops(true);
+      let shopsData;
+      
+      if (withCoordinates && userCoordinates) {
+        // Fetch shops with coordinates to get accurate distances
+        shopsData = await shopsApi.getAll(userCoordinates.latitude, userCoordinates.longitude);
+      } else {
+        // Fetch shops without coordinates first
+        shopsData = await shopsApi.getAll();
+      }
+      
+      if (__DEV__) {
+        console.log(`✅ Shops loaded${withCoordinates ? ' (with location)' : ' (initial)'}:`, shopsData.length);
+        console.log('📦 Shops data:', JSON.stringify(shopsData, null, 2));
+      }
+      
+      // Ensure shopsData is an array
+      if (Array.isArray(shopsData)) {
+        setShops(shopsData);
+      } else {
+        console.warn('⚠️ Shops data is not an array:', typeof shopsData);
+        setShops([]);
+      }
+    } catch (error) {
+      // Log error in development mode for debugging
+      if (__DEV__) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error('❌ Failed to load shops:', errorMessage);
+      }
+      // Set empty shops array on error
+      setShops([]);
+    } finally {
+      setIsLoadingShops(false);
+    }
+  };
+
   // Load shops from backend on mount (without coordinates)
   useEffect(() => {
-    const fetchShopsInitial = async () => {
-      try {
-        setIsLoadingShops(true);
-        // Fetch shops without coordinates first
-        const shopsData = await shopsApi.getAll();
-        if (__DEV__) {
-          console.log('✅ Shops loaded (initial):', shopsData.length);
-          console.log('📦 Shops data:', JSON.stringify(shopsData, null, 2));
-        }
-        // Ensure shopsData is an array
-        if (Array.isArray(shopsData)) {
-        setShops(shopsData);
-        } else {
-          console.warn('⚠️ Shops data is not an array:', typeof shopsData);
-          setShops([]);
-        }
-      } catch (error) {
-        // Log error in development mode for debugging
-        if (__DEV__) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error('❌ Failed to load shops:', errorMessage);
-        }
-        // Set empty shops array on error
-        setShops([]);
-      } finally {
-        setIsLoadingShops(false);
-      }
-    };
-    // Fetch shops immediately on mount
-    fetchShopsInitial();
+    fetchShops(false);
   }, []); // Only run on mount
+
+  // Refresh shops when screen comes into focus (to get updated shop status)
+  useFocusEffect(
+    useCallback(() => {
+      // Refresh shops when screen comes into focus
+      // This ensures shops list is updated when vendor changes shop status
+      if (userCoordinates) {
+        fetchShops(true);
+      } else {
+        fetchShops(false);
+      }
+    }, [userCoordinates])
+  );
 
   // Re-fetch shops when coordinates become available to update distances
   useEffect(() => {
     if (!userCoordinates) return; // Skip if no coordinates yet
     
-    const fetchShopsWithLocation = async () => {
-      try {
-        // Re-fetch with coordinates to get accurate distances
-        const shopsData = await shopsApi.getAll(userCoordinates.latitude, userCoordinates.longitude);
-        if (__DEV__) {
-          console.log('✅ Shops updated with location:', shopsData.length);
-          console.log('📦 Updated shops data:', JSON.stringify(shopsData, null, 2));
-        }
-        // Ensure shopsData is an array
-        if (Array.isArray(shopsData)) {
-          setShops(shopsData);
-        } else {
-          console.warn('⚠️ Updated shops data is not an array:', typeof shopsData);
-        }
-      } catch (error) {
-        // Silently fail - we already have shops from initial load
-        if (__DEV__) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.warn('⚠️ Failed to update shops with location:', errorMessage);
-        }
-      }
-    };
-    fetchShopsWithLocation();
+    // Fetch shops with coordinates to get accurate distances
+    fetchShops(true);
   }, [userCoordinates]);
 
   // Debug: Log shops state changes
@@ -340,7 +343,11 @@ export default function HomeScreen() {
 
   // Handle pull-to-refresh
   const handleRefresh = async () => {
-    await refreshProducts();
+    // Refresh both products and shops
+    await Promise.all([
+      refreshProducts(),
+      fetchShops(userCoordinates ? true : false)
+    ]);
   };
 
   // Filter products based on category and search query

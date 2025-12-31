@@ -151,13 +151,26 @@ export const getAllShops = async (req, res, next) => {
 
     // Fetch shops - only show approved shops (is_approved = true) that are open (is_open = true)
     // All vendor registration data is stored directly in shops table (no vendors table)
+    // IMPORTANT: Filter by is_open = true AND is_open IS NOT NULL (handle NULL as closed)
     const { data: shopsData, error: shopsError } = await supabase
       .from('shops')
       .select('*')
       .eq('is_active', true)
       .eq('is_approved', true) // Only show approved shops
       .eq('is_open', true) // Only show shops that are open (vendor has toggled on)
+      .not('is_open', 'is', null) // Also exclude shops where is_open is NULL (treat as closed)
       .order('created_at', { ascending: false });
+    
+    // Debug: Log shop count and is_open status
+    if (shopsData && shopsData.length > 0) {
+      console.log(`[getAllShops] Found ${shopsData.length} open shops (is_open = true)`);
+      // Log first shop's is_open status for debugging
+      if (shopsData[0]) {
+        console.log(`[getAllShops] Sample shop is_open status:`, shopsData[0].is_open, shopsData[0].name);
+      }
+    } else {
+      console.log('[getAllShops] No open shops found (all shops are closed or is_open is NULL)');
+    }
 
     if (shopsError) {
       console.error('[getAllShops] Error fetching shops:', shopsError);
