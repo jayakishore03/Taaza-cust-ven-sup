@@ -119,16 +119,26 @@ export default function Step7PartnerContract() {
     }
 
     setSubmitting(true);
-    await updateRegistrationData({ contractAccepted: true, profitShare: 20 });
-    
-    const result = await submitRegistration(password);
-    setSubmitting(false);
+    try {
+      await updateRegistrationData({ contractAccepted: true, profitShare: 20 });
+      
+      const result = await submitRegistration(password);
 
-    if (result.success) {
-      // Show success screen
-      setShowSuccessScreen(true);
-    } else {
-      Alert.alert('Error', result.message || 'Failed to submit registration. Please try again.');
+      if (result.success) {
+        // Show success screen
+        setShowSuccessScreen(true);
+      } else {
+        Alert.alert('Error', result.message || 'Failed to submit registration. Please try again.');
+      }
+    } catch (error: any) {
+      console.error('[Contract] Registration error:', error);
+      Alert.alert(
+        'Registration Error', 
+        error.message || 'Registration failed. Please check your internet connection and try again.'
+      );
+    } finally {
+      // Always stop loading, even if there's an error
+      setSubmitting(false);
     }
   };
 
