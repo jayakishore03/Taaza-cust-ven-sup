@@ -159,13 +159,9 @@ export default function RegisterDocumentsScreen() {
         return;
       }
 
-      // Step 2: Get supabase instance (no need to create user in public.users table)
-      // The delivery_agents table directly references auth.users, not public.users
-      const { supabase } = await import('../../lib/supabase');
-      
       console.log('✅ Auth user created:', authUser.id);
 
-      // Step 3: Upload documents to Supabase Storage
+      // Step 2: Upload documents to Supabase Storage
       let drivingLicenseUrl = null;
       let aadharUrl = null;
       let panUrl = null;
@@ -203,10 +199,11 @@ export default function RegisterDocumentsScreen() {
         return;
       }
 
-      // Step 4: Save delivery agent profile to database
-      const { error: profileError } = await supabase
-        .from('delivery_agents')
-        .insert({
+      // Step 3: Save delivery agent profile via backend API
+      try {
+        const { deliveryAgentAPI } = await import('../../services/api');
+        
+        const result = await deliveryAgentAPI.register({
           user_id: authUser.id,
           full_name: params.fullName as string,
           email: email,
@@ -224,18 +221,15 @@ export default function RegisterDocumentsScreen() {
           bank_name: bankDetails.bankName,
           bank_account_holder_name: bankDetails.accountHolderName,
           bank_branch_name: bankDetails.branchName,
-          verification_status: 'pending',
-          is_active: false, // Inactive until verified by admin
         });
 
-      if (profileError) {
-        console.error('❌ Profile creation error:', profileError);
+        console.log('✅ Delivery agent profile created successfully:', result.data);
+      } catch (apiError: any) {
+        console.error('❌ Profile creation error:', apiError);
         setLoading(false);
-        Alert.alert('Registration Error', 'Account created but profile setup failed. Please contact support.');
+        Alert.alert('Registration Error', apiError.message || 'Account created but profile setup failed. Please contact support.');
         return;
       }
-      
-      console.log('✅ Delivery agent profile created successfully');
 
       setLoading(false);
       

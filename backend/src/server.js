@@ -30,6 +30,7 @@ import migrateReferenceRoutes from './routes/migrate-reference-data.js';
 import vendorRoutes from './routes/vendor.js';
 import emailRoutes from './routes/email.js';
 import bankRoutes from './routes/bank.js';
+import deliveryAgentsRoutes from './routes/deliveryAgents.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -326,6 +327,7 @@ app.use('/api/migrate-reference', migrateReferenceRoutes);
 app.use('/api/vendor', vendorRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/bank', bankRoutes);
+app.use('/api/delivery-agents', deliveryAgentsRoutes);
 
 // 404 handler
 app.use(notFound);
