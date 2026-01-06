@@ -148,20 +148,12 @@ export default function RegisterDocumentsScreen() {
     setLoading(true);
     
     try {
-      // Step 1: Create auth user
       const email = params.email as string;
       const password = params.password as string;
-      const { error: signUpError, user: authUser } = await signUp(email, password);
 
-      if (signUpError || !authUser) {
-        setLoading(false);
-        Alert.alert('Registration Failed', signUpError?.message || 'Failed to create account');
-        return;
-      }
-
-      console.log('✅ Auth user created:', authUser.id);
-
-      // Step 2: Upload documents to Supabase Storage
+      // Step 1: Upload documents to temporary storage
+      // We need a temporary user ID for document upload paths
+      const tempUserId = `temp_${Date.now()}`;
       let drivingLicenseUrl = null;
       let aadharUrl = null;
       let panUrl = null;
@@ -172,22 +164,22 @@ export default function RegisterDocumentsScreen() {
         
         if (documents.drivingLicense) {
           console.log('Uploading driving license...');
-          drivingLicenseUrl = await uploadAgentDocument(documents.drivingLicense, authUser.id, 'driving_license');
+          drivingLicenseUrl = await uploadAgentDocument(documents.drivingLicense, tempUserId, 'driving_license');
           console.log('✅ Driving license uploaded');
         }
         if (documents.aadhar) {
           console.log('Uploading aadhar...');
-          aadharUrl = await uploadAgentDocument(documents.aadhar, authUser.id, 'aadhar');
+          aadharUrl = await uploadAgentDocument(documents.aadhar, tempUserId, 'aadhar');
           console.log('✅ Aadhar uploaded');
         }
         if (documents.pan) {
           console.log('Uploading PAN...');
-          panUrl = await uploadAgentDocument(documents.pan, authUser.id, 'pan');
+          panUrl = await uploadAgentDocument(documents.pan, tempUserId, 'pan');
           console.log('✅ PAN uploaded');
         }
         if (documents.selfie) {
           console.log('Uploading selfie...');
-          selfieUrl = await uploadAgentDocument(documents.selfie, authUser.id, 'selfie');
+          selfieUrl = await uploadAgentDocument(documents.selfie, tempUserId, 'selfie');
           console.log('✅ Selfie uploaded');
         }
         
@@ -199,14 +191,14 @@ export default function RegisterDocumentsScreen() {
         return;
       }
 
-      // Step 3: Save delivery agent profile via backend API
+      // Step 2: Complete signup via backend (creates auth user + profile)
       try {
         const { deliveryAgentAPI } = await import('../../services/api');
         
-        const result = await deliveryAgentAPI.register({
-          user_id: authUser.id,
-          full_name: params.fullName as string,
+        const result = await deliveryAgentAPI.signup({
           email: email,
+          password: password,
+          full_name: params.fullName as string,
           phone_number: params.phoneNumber as string,
           alternate_phone: params.alternatePhone as string,
           vehicle_type: params.vehicleType as string,
@@ -223,11 +215,11 @@ export default function RegisterDocumentsScreen() {
           bank_branch_name: bankDetails.branchName,
         });
 
-        console.log('✅ Delivery agent profile created successfully:', result.data);
+        console.log('✅ Delivery agent registered successfully:', result.data);
       } catch (apiError: any) {
-        console.error('❌ Profile creation error:', apiError);
+        console.error('❌ Registration error:', apiError);
         setLoading(false);
-        Alert.alert('Registration Error', apiError.message || 'Account created but profile setup failed. Please contact support.');
+        Alert.alert('Registration Error', apiError.message || 'Failed to create account. Please try again.');
         return;
       }
 

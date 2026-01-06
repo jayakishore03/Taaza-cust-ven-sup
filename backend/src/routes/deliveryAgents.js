@@ -3,6 +3,9 @@ import * as deliveryAgentsController from '../controllers/deliveryAgentsControll
 
 const router = express.Router();
 
+// Complete signup (create auth user + profile)
+router.post('/signup', deliveryAgentsController.signupDeliveryAgent);
+
 // Register new delivery agent
 router.post('/register', deliveryAgentsController.registerDeliveryAgent);
 

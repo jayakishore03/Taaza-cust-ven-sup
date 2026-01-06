@@ -5,6 +5,122 @@ const supabaseUrl = process.env.SUPABASE_URL || 'https://fcrhcwvpivkadkkbxcom.su
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+// Complete signup: Create auth user + delivery agent profile
+export const signupDeliveryAgent = async (req, res) => {
+  try {
+    const {
+      email,
+      password,
+      full_name,
+      phone_number,
+      alternate_phone,
+      vehicle_type,
+      vehicle_number,
+      vehicle_name,
+      driving_license_url,
+      aadhar_url,
+      pan_url,
+      selfie_url,
+      bank_account_number,
+      bank_ifsc_code,
+      bank_name,
+      bank_account_holder_name,
+      bank_branch_name,
+    } = req.body;
+
+    console.log('🚀 Starting delivery agent complete signup...');
+
+    // Validation
+    if (!email || !password || !full_name || !phone_number) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email, password, full name, and phone number are required',
+      });
+    }
+
+    // Step 1: Create auth user with auto-confirmation
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true, // Auto-confirm email
+      user_metadata: {
+        full_name,
+        phone_number,
+        role: 'delivery_agent',
+      },
+    });
+
+    if (authError || !authData.user) {
+      console.error('❌ Failed to create auth user:', authError);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create user account',
+        details: authError?.message,
+      });
+    }
+
+    const userId = authData.user.id;
+    console.log('✅ Auth user created:', userId);
+
+    // Step 2: Create delivery agent profile
+    const { data: agentData, error: agentError } = await supabase
+      .from('delivery_agents')
+      .insert({
+        user_id: userId,
+        full_name,
+        email,
+        phone_number,
+        alternate_phone,
+        vehicle_type,
+        vehicle_number,
+        vehicle_name,
+        driving_license_url,
+        aadhar_url,
+        pan_url,
+        selfie_url,
+        bank_account_number,
+        bank_ifsc_code,
+        bank_name,
+        bank_account_holder_name,
+        bank_branch_name,
+        verification_status: 'pending',
+        is_active: false,
+      })
+      .select()
+      .single();
+
+    if (agentError) {
+      console.error('❌ Failed to create delivery agent profile:', agentError);
+      // Cleanup: delete the auth user since profile creation failed
+      await supabase.auth.admin.deleteUser(userId);
+      
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create delivery agent profile',
+        details: agentError.message,
+      });
+    }
+
+    console.log('✅ Delivery agent profile created:', agentData.id);
+
+    res.status(201).json({
+      success: true,
+      message: 'Delivery agent registered successfully. Account is pending verification.',
+      data: {
+        user: authData.user,
+        agent: agentData,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Signup error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error.message,
+    });
+  }
+};
+
 // Register new delivery agent
 export const registerDeliveryAgent = async (req, res) => {
   try {
@@ -49,6 +165,21 @@ export const registerDeliveryAgent = async (req, res) => {
     }
 
     console.log('✅ Auth user verified:', user_id);
+
+    // Auto-confirm email if not confirmed (for delivery agents)
+    if (authUser.user && !authUser.user.email_confirmed_at) {
+      console.log('📧 Auto-confirming email for delivery agent...');
+      const { error: confirmError } = await supabase.auth.admin.updateUserById(
+        user_id,
+        { email_confirm: true }
+      );
+      
+      if (confirmError) {
+        console.warn('⚠️  Failed to auto-confirm email:', confirmError);
+      } else {
+        console.log('✅ Email auto-confirmed');
+      }
+    }
 
     // Insert delivery agent profile
     const { data, error } = await supabase

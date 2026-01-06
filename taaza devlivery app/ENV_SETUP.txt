@@ -1,0 +1,9 @@
+Create a file named .env in this folder with:
+
+EXPO_PUBLIC_API_URL=https://taaza-customer.vercel.app/api
+
+This will connect the app to your Vercel backend.
+
+
+
+
