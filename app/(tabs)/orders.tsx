@@ -1,4 +1,5 @@
-import { useMemo, useEffect, useState } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -17,7 +18,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ordersApi } from '../../lib/api/orders';
 import { getAuthToken } from '../../lib/auth/helper';
 
-const statusStyles: Record<OrderStatus, { labelColor: string; pillColor: string; icon: React.ReactNode }> = {
+const statusStyles: Record<string, { labelColor: string; pillColor: string; icon: React.ReactNode }> = {
   'Out for Delivery': {
     labelColor: '#1D4ED8',
     pillColor: '#DBEAFE',
@@ -27,6 +28,21 @@ const statusStyles: Record<OrderStatus, { labelColor: string; pillColor: string;
     labelColor: '#D97706',
     pillColor: '#FEF3C7',
     icon: <Clock size={16} color="#D97706" strokeWidth={2} />,
+  },
+  'Order Placed': {
+    labelColor: '#D97706',
+    pillColor: '#FEF3C7',
+    icon: <Clock size={16} color="#D97706" strokeWidth={2} />,
+  },
+  'Order Ready': {
+    labelColor: '#059669',
+    pillColor: '#D1FAE5',
+    icon: <PackageCheck size={16} color="#059669" strokeWidth={2} />,
+  },
+  'Picked Up': {
+    labelColor: '#1D4ED8',
+    pillColor: '#DBEAFE',
+    icon: <Truck size={16} color="#1D4ED8" strokeWidth={2} />,
   },
   Delivered: {
     labelColor: '#059669',
@@ -38,6 +54,13 @@ const statusStyles: Record<OrderStatus, { labelColor: string; pillColor: string;
     pillColor: '#FEE2E2',
     icon: <Clock size={16} color="#DC2626" strokeWidth={2} />,
   },
+};
+
+// Default fallback for unknown statuses
+const defaultStatusStyle = {
+  labelColor: '#6B7280',
+  pillColor: '#F3F4F6',
+  icon: <Clock size={16} color="#6B7280" strokeWidth={2} />,
 };
 
 export default function OrdersScreen() {
@@ -77,7 +100,34 @@ export default function OrdersScreen() {
     };
 
     fetchOrders();
+
+    // Poll for order status updates every 10 seconds
+    const pollInterval = setInterval(() => {
+      if (isAuthenticated && user) {
+        fetchOrders();
+      }
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(pollInterval);
   }, [isAuthenticated, user]);
+
+  // Refresh orders when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (isAuthenticated && user) {
+        const refreshOrders = async () => {
+          try {
+            await getAuthToken();
+            const ordersData = await ordersApi.getAll();
+            setOrders(ordersData);
+          } catch (error) {
+            console.error('Error refreshing orders:', error);
+          }
+        };
+        refreshOrders();
+      }
+    }, [isAuthenticated, user])
+  );
 
   const partitionedOrders = useMemo(() => {
     const active: OrderSummary[] = [];
@@ -212,7 +262,7 @@ export default function OrdersScreen() {
   }
 
   const renderOrderCard = (order: OrderSummary) => {
-    const meta = statusStyles[order.status];
+    const meta = statusStyles[order.status] || defaultStatusStyle;
     const showOtp = showOtpForOrders.has(order.id);
 
     return (

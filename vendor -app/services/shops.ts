@@ -864,6 +864,22 @@ export const createShopInSupabase = async (
       console.warn('[createShopInSupabase] ⚠️ Shop is INACTIVE - will NOT appear in customer app');
     }
 
+    // Automatically copy base products to this shop
+    try {
+      const { copyBaseProductsToShop } = await import('./products');
+      const copyResult = await copyBaseProductsToShop(data.id, data.shop_type || null);
+      
+      if (copyResult.success) {
+        console.log(`[createShopInSupabase] ✅ Successfully copied ${copyResult.copiedCount || 0} base products to shop ${data.id}`);
+      } else {
+        console.warn(`[createShopInSupabase] ⚠️ Failed to copy products to shop: ${copyResult.error}`);
+        // Don't fail shop creation if product copy fails - products can be copied later
+      }
+    } catch (copyError: any) {
+      console.error('[createShopInSupabase] Error copying products to shop:', copyError);
+      // Don't fail shop creation if product copy fails - products can be copied later
+    }
+
     return {
       success: true,
       data: data as Shop,

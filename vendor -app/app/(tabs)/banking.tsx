@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
   Switch,
   KeyboardAvoidingView,
   Platform,
-  Animated,
+  ActivityIndicator,
 } from 'react-native';
 import {
   Building,
@@ -22,12 +22,11 @@ import {
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getVendorOrders, Order } from '@/services/api';
 
-const initialBalance = Math.floor(Math.random() * 50000) + 10000;
 
 export default function BankingScreen() {
   const [showAccountNumber, setShowAccountNumber] = useState(false);
-  const [autoWithdrawal, setAutoWithdrawal] = useState(true);
   const [bankingData, setBankingData] = useState({
     accountHolderName: '',
     bankName: '',
@@ -40,21 +39,11 @@ export default function BankingScreen() {
     minimumBalance: '0',
   });
 
-  const animatedBalance = useRef(new Animated.Value(initialBalance)).current;
+  const [currentBalance, setCurrentBalance] = useState(0);
+  const [balanceLoading, setBalanceLoading] = useState(true);
+  
 
-  const [displayBalance, setDisplayBalance] = useState(initialBalance);
-
-  useEffect(() => {
-    animatedBalance.addListener(({ value }) => {
-      setDisplayBalance(Math.floor(value));
-    });
-
-    return () => {
-      animatedBalance.removeAllListeners();
-    };
-  }, []);
-
-  // Load banking details saved at registration time from cached vendor/shop data
+  // Load banking details and calculate real income from orders
   useEffect(() => {
     const loadBankingDetails = async () => {
       try {
@@ -82,7 +71,60 @@ export default function BankingScreen() {
       }
     };
 
+    const loadBalance = async () => {
+      try {
+        setBalanceLoading(true);
+        // Fetch all orders to calculate total income
+        const orders = await getVendorOrders();
+        
+        if (!orders || orders.length === 0) {
+          setCurrentBalance(0);
+          setBalanceLoading(false);
+          return;
+        }
+
+        // Calculate total income from all orders (after 20% commission deduction)
+        const totalIncome = orders.reduce((sum, order) => {
+          let orderAmount = 0;
+          
+          // Try to get total_amount (number) first, then parse total (string) if needed
+          if (order.total_amount) {
+            orderAmount = order.total_amount;
+          } else if (order.total) {
+            // Parse formatted string like "₹1,234.56" or "₹1234.56"
+            const numericValue = parseFloat(order.total.replace(/[₹,\s]/g, ''));
+            orderAmount = isNaN(numericValue) ? 0 : numericValue;
+          }
+          
+          // Skip if order amount is 0 or invalid
+          if (orderAmount <= 0) {
+            return sum;
+          }
+          
+          // Deduct 20% commission from each order
+          // Commission = 20% of order amount
+          const commission = orderAmount * 0.20;
+          // Net amount = Order amount - Commission (vendor receives 80% of order value)
+          const netAmount = orderAmount - commission;
+          
+          console.log(`[loadBalance] Order ${order.id || 'N/A'}: Original Amount=₹${orderAmount}, Commission (20%)=₹${commission.toFixed(2)}, Net Amount=₹${netAmount.toFixed(2)}`);
+          
+          return sum + netAmount;
+        }, 0);
+        
+        console.log(`[loadBalance] Total Balance (after 20% commission): ₹${totalIncome.toLocaleString('en-IN')}`);
+
+        setCurrentBalance(totalIncome);
+      } catch (error) {
+        console.error('[BankingScreen] Error loading balance:', error);
+        setCurrentBalance(0);
+      } finally {
+        setBalanceLoading(false);
+      }
+    };
+
     loadBankingDetails();
+    loadBalance();
   }, []);
 
   const updateField = (field: keyof typeof bankingData, value: string) => {
@@ -100,6 +142,7 @@ export default function BankingScreen() {
     }
     Alert.alert('Success', 'Banking details updated successfully!');
   };
+
 
   return (
     <SafeAreaView style={styles.container}>
@@ -126,13 +169,30 @@ export default function BankingScreen() {
           contentContainerStyle={{ paddingBottom: 30 }}
         >
           <View style={styles.balanceCard}>
-            <View>
-              <Text style={styles.balanceLabel}>Current Balance</Text>
-              <Animated.Text style={styles.balanceAmount}>
-                ₹{displayBalance.toLocaleString('en-IN')}
-              </Animated.Text>
+            <View style={styles.balanceContent}>
+              <View style={styles.balanceHeader}>
+                <Text style={styles.balanceLabel}>Current Balance</Text>
+                <Building size={24} color="#111111" />
+              </View>
+              {balanceLoading ? (
+                <View style={styles.balanceLoadingContainer}>
+                  <ActivityIndicator size="small" color="#111111" />
+                  <Text style={[styles.balanceAmount, { marginLeft: 8 }]}>Loading...</Text>
+                </View>
+              ) : (
+                <Text style={styles.balanceAmount}>
+                  ₹{currentBalance.toLocaleString('en-IN', { maximumFractionDigits: 0, minimumFractionDigits: 0 })}
+                </Text>
+              )}
+              <View style={styles.balanceNote}>
+                <Text style={styles.balanceNoteText}>
+                  Your earnings will be automatically credited to your registered bank account every Monday.
+                </Text>
+                <Text style={[styles.balanceNoteText, { marginTop: 6, fontWeight: '500' }]}>
+                  This amount is after platform fee (20%) deduction. Your net income is displayed here.
+                </Text>
+              </View>
             </View>
-            <Building size={60} color="#111111" />
           </View>
 
           <View style={styles.section}>
@@ -282,31 +342,6 @@ export default function BankingScreen() {
             </View>
           </View>
 
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Shield size={24} color="#000000" />
-              <Text style={styles.sectionTitle}>Withdrawal Settings</Text>
-            </View>
-
-            {/* INFO TEXT INSTEAD OF WITHDRAWAL AMOUNT */}
-            <Text style={{ marginBottom: 12, fontSize: 14, color: '#374151' }}>
-              Earnings will be automatically credited to your bank account every Monday.
-            </Text>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Minimum Balance (₹)</Text>
-              <View style={styles.inputWrapper}>
-                <TextInput
-                  style={styles.input}
-                  value={bankingData.minimumBalance}
-                  onChangeText={text => updateField('minimumBalance', text)}
-                  placeholder="Minimum balance to maintain"
-                  keyboardType="numeric"
-                  placeholderTextColor="#6B7280"
-                />
-              </View>
-            </View>
-          </View>
 
           <View style={styles.securityNotice}>
             <Shield size={20} color="#059669" />
@@ -319,6 +354,7 @@ export default function BankingScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
     </SafeAreaView>
   );
 }
@@ -372,14 +408,20 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginTop: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 6,
+  },
+  balanceContent: {
+    width: '100%',
+  },
+  balanceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   balanceLabel: {
     fontSize: 14,
@@ -391,6 +433,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#111111',
     marginTop: 4,
+  },
+  balanceLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  balanceNote: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  balanceNoteText: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 18,
   },
   section: {
     backgroundColor: '#FFFFFF',

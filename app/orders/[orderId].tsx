@@ -21,7 +21,7 @@ import { useState, useEffect } from 'react';
 import { ActivityIndicator, Alert } from 'react-native';
 
 const statusStyles: Record<
-  OrderStatus,
+  string,
   { labelColor: string; pillColor: string }
 > = {
   'Out for Delivery': {
@@ -32,6 +32,18 @@ const statusStyles: Record<
     labelColor: '#D97706',
     pillColor: '#FEF3C7',
   },
+  'Order Placed': {
+    labelColor: '#D97706',
+    pillColor: '#FEF3C7',
+  },
+  'Order Ready': {
+    labelColor: '#059669',
+    pillColor: '#D1FAE5',
+  },
+  'Picked Up': {
+    labelColor: '#1D4ED8',
+    pillColor: '#DBEAFE',
+  },
   Delivered: {
     labelColor: '#059669',
     pillColor: '#D1FAE5',
@@ -40,6 +52,12 @@ const statusStyles: Record<
     labelColor: '#DC2626',
     pillColor: '#FEE2E2',
   },
+};
+
+// Default fallback for unknown statuses
+const defaultStatusStyle = {
+  labelColor: '#6B7280',
+  pillColor: '#F3F4F6',
 };
 
 export default function OrderDetailsScreen() {
@@ -118,7 +136,7 @@ export default function OrderDetailsScreen() {
     );
   }
 
-  const meta = statusStyles[order.status];
+  const meta = statusStyles[order.status] || defaultStatusStyle;
 
   const handleTrackOrder = () => {
     router.push({
@@ -149,10 +167,10 @@ export default function OrderDetailsScreen() {
       >
         <View style={styles.statusCard}>
           <View
-            style={[styles.statusPill, { backgroundColor: meta.pillColor }]}
+            style={[styles.statusPill, { backgroundColor: meta?.pillColor || defaultStatusStyle.pillColor }]}
           >
-            <PackageCheck size={18} color={meta.labelColor} strokeWidth={2} />
-            <Text style={[styles.statusLabel, { color: meta.labelColor }]}>
+            <PackageCheck size={18} color={meta?.labelColor || defaultStatusStyle.labelColor} strokeWidth={2} />
+            <Text style={[styles.statusLabel, { color: meta?.labelColor || defaultStatusStyle.labelColor }]}>
               {order.status}
             </Text>
           </View>

@@ -15,6 +15,7 @@ import { ArrowLeft, Package, MapPin, Clock, Phone, User, CreditCard } from 'luci
 import { getVendorOrderById, updateOrderStatus, Order } from '../services/api';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { Platform, StatusBar as RNStatusBar } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STATUS_BAR_HEIGHT = Platform.OS === 'android' ? RNStatusBar.currentHeight || 24 : 44;
 
@@ -49,6 +50,20 @@ export default function OrderDetailsScreen() {
       setLoading(true);
       const orderData = await getVendorOrderById(id);
       setOrder(orderData);
+      
+      // Mark order as viewed when order details are loaded
+      // This ensures the order moves from "New Orders" to "All Orders"
+      try {
+        const viewedStr = await AsyncStorage.getItem('viewed_order_ids');
+        const viewedArray = viewedStr ? JSON.parse(viewedStr) : [];
+        if (!viewedArray.includes(id)) {
+          viewedArray.push(id);
+          await AsyncStorage.setItem('viewed_order_ids', JSON.stringify(viewedArray));
+          console.log(`[OrderDetailsScreen] Marked order ${id} as viewed`);
+        }
+      } catch (storageError) {
+        console.error('[OrderDetailsScreen] Error saving viewed order:', storageError);
+      }
     } catch (error: any) {
       console.error('[OrderDetailsScreen] Error loading order:', error);
       Alert.alert('Error', 'Failed to load order details');
@@ -83,6 +98,19 @@ export default function OrderDetailsScreen() {
               } else {
                 // If updatedOrder is not returned, reload from backend
                 await loadOrderDetails();
+              }
+              
+              // Mark order as viewed when status is updated (moves to All Orders)
+              try {
+                const viewedStr = await AsyncStorage.getItem('viewed_order_ids');
+                const viewedArray = viewedStr ? JSON.parse(viewedStr) : [];
+                if (!viewedArray.includes(order.id)) {
+                  viewedArray.push(order.id);
+                  await AsyncStorage.setItem('viewed_order_ids', JSON.stringify(viewedArray));
+                  console.log(`[OrderDetailsScreen] Marked order ${order.id} as viewed after status update`);
+                }
+              } catch (storageError) {
+                console.error('[OrderDetailsScreen] Error saving viewed order:', storageError);
               }
               
               // Ensure updating state is cleared

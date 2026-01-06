@@ -12,12 +12,14 @@ export const errorHandler = (err, req, res, next) => {
   // Provide more user-friendly error messages
   if (message.includes('Server configuration error') || 
       message.includes('Supabase credentials are invalid') ||
-      message.includes('Supabase not configured')) {
+      message.includes('Supabase credentials are invalid or missing') ||
+      message.includes('Supabase not configured') ||
+      message.includes('Invalid API key') ||
+      message.includes('JWT') ||
+      message.includes('Supabase Admin client not initialized')) {
     // Format the configuration error message for users
     message = 'The server is not properly configured. Please contact support or try again later.';
-  } else if (message.includes('Invalid API key') || message.includes('JWT')) {
-    message = 'The server is not properly configured. Please contact support or try again later.';
-  } else if (statusCode === 500 && !message.includes('Server configuration')) {
+  } else if (statusCode === 500 && !message.includes('Server configuration') && !message.includes('Supabase')) {
     // For generic 500 errors, provide a user-friendly message
     message = 'An error occurred while processing your request. Please try again later.';
   }

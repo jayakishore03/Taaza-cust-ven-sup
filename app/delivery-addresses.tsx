@@ -100,6 +100,10 @@ export default function DeliveryAddressesScreen() {
         errorMsg.includes('session has expired') ||
         errorMsg.includes('Invalid API key') ||
         errorMsg.includes('Backend configuration error') ||
+        errorMsg.includes('Server configuration error') ||
+        errorMsg.includes('The server is not properly configured') ||
+        errorMsg.includes('not properly configured') ||
+        errorMsg.includes('Supabase credentials are invalid or missing') ||
         errorMsg.includes('User not authenticated');
       
       if (!isExpectedError && __DEV__) {
@@ -216,6 +220,10 @@ export default function DeliveryAddressesScreen() {
         errorMsg.includes('Invalid API key') ||
         errorMsg.includes('Backend configuration error') ||
         errorMsg.includes('Server configuration error') ||
+        errorMsg.includes('The server is not properly configured') ||
+        errorMsg.includes('not properly configured') ||
+        errorMsg.includes('Supabase credentials are invalid or missing') ||
+        errorMsg.includes('Supabase credentials are invalid') ||
         errorMsg.includes('User not authenticated') ||
         errorMsg.includes('Incomplete Address') ||
         errorMsg.includes('Cannot connect') ||
@@ -245,7 +253,12 @@ export default function DeliveryAddressesScreen() {
         );
       } 
       // Handle server configuration errors - provide helpful message
-      else if (errorMsg.includes('Server configuration error') || errorMsg.includes('Backend configuration error')) {
+      else if (errorMsg.includes('Server configuration error') || 
+               errorMsg.includes('Backend configuration error') ||
+               errorMsg.includes('The server is not properly configured') ||
+               errorMsg.includes('not properly configured') ||
+               errorMsg.includes('Supabase credentials are invalid or missing') ||
+               errorMsg.includes('Supabase credentials are invalid')) {
         Alert.alert(
           'Server Error',
           'The server is not properly configured. Please contact support or try again later.\n\nIf you are the administrator, make sure Supabase environment variables are set in Vercel.',
@@ -286,6 +299,10 @@ export default function DeliveryAddressesScreen() {
         errorMsg.includes('session has expired') ||
         errorMsg.includes('Invalid API key') ||
         errorMsg.includes('Backend configuration error') ||
+        errorMsg.includes('Server configuration error') ||
+        errorMsg.includes('The server is not properly configured') ||
+        errorMsg.includes('not properly configured') ||
+        errorMsg.includes('Supabase credentials are invalid or missing') ||
         errorMsg.includes('User not authenticated');
       
       if (!isExpectedError && __DEV__) {

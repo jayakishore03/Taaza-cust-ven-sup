@@ -138,20 +138,25 @@ export const getVendorOrders = async (req, res, next) => {
     console.log('========================================');
     console.log('Vendor User ID:', userId);
 
-    // SIMPLIFIED: Find vendor's shop by user_id or email/phone, then query orders by shop_id only
+    // Find vendor's shop by user_id or email/phone, then query orders by shop_id only
+    // Use supabaseAdmin to bypass RLS and ensure we can find newly registered shops
     let shopId = null;
     
-    // Method 1: Find shop by user_id
-    const { data: shopsByUserId } = await supabase
+    // Method 1: Find shop by user_id (using admin client to bypass RLS)
+    const { data: shopsByUserId, error: userIdError } = await supabaseAdmin
       .from('shops')
-      .select('id, name')
+      .select('id, name, user_id, email, mobile_number')
       .eq('user_id', userId)
       .limit(1);
 
-    if (shopsByUserId && shopsByUserId.length > 0) {
+    if (userIdError) {
+      console.log('⚠️ Error finding shop by user_id:', userIdError.message);
+    } else if (shopsByUserId && shopsByUserId.length > 0) {
       shopId = shopsByUserId[0].id;
-      console.log('✅ Found shop by user_id:', shopId);
+      console.log('✅ Found shop by user_id:', shopId, 'Shop name:', shopsByUserId[0].name);
     } else {
+      console.log('⚠️ No shop found by user_id, trying email/phone lookup...');
+      
       // Method 2: Get vendor's email/phone from auth.users and find shop by email/phone
       try {
         const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
@@ -164,24 +169,48 @@ export const getVendorOrders = async (req, res, next) => {
             phone: vendorPhone 
           });
           
-          // Build OR query properly
-          let query = supabase.from('shops').select('id, name, email, mobile_number');
+          // Use admin client to bypass RLS for new shops
+          let query = supabaseAdmin.from('shops').select('id, name, email, mobile_number, owner_phone');
           
           if (vendorEmail) {
-            query = query.or(`email.eq.${vendorEmail},mobile_number.eq.${vendorPhone || ''},owner_phone.eq.${vendorPhone || ''}`);
+            // Try multiple fields to find the shop
+            const { data: shopsByEmail, error: emailError } = await supabaseAdmin
+              .from('shops')
+              .select('id, name, email, mobile_number, owner_phone')
+              .eq('email', vendorEmail)
+              .limit(1);
+            
+            if (!emailError && shopsByEmail && shopsByEmail.length > 0) {
+              shopId = shopsByEmail[0].id;
+              console.log('✅ Found shop by email:', shopId, 'Shop:', shopsByEmail[0]);
           } else if (vendorPhone) {
-            query = query.or(`mobile_number.eq.${vendorPhone},owner_phone.eq.${vendorPhone}`);
-          }
-          
-          const { data: shopsByContact, error: shopError } = await query.limit(1);
-          
-          if (shopError) {
-            console.log('❌ Error finding shop by email/phone:', shopError.message);
-          } else if (shopsByContact && shopsByContact.length > 0) {
-            shopId = shopsByContact[0].id;
-            console.log('✅ Found shop by email/phone:', shopId, 'Shop:', shopsByContact[0]);
+              // Try phone number
+              const { data: shopsByPhone, error: phoneError } = await supabaseAdmin
+                .from('shops')
+                .select('id, name, email, mobile_number, owner_phone')
+                .or(`mobile_number.eq.${vendorPhone},owner_phone.eq.${vendorPhone}`)
+                .limit(1);
+              
+              if (!phoneError && shopsByPhone && shopsByPhone.length > 0) {
+                shopId = shopsByPhone[0].id;
+                console.log('✅ Found shop by phone:', shopId, 'Shop:', shopsByPhone[0]);
+              } else {
+                console.log('❌ No shop found by email or phone');
+              }
+            }
+          } else if (vendorPhone) {
+            const { data: shopsByPhone, error: phoneError } = await supabaseAdmin
+              .from('shops')
+              .select('id, name, email, mobile_number, owner_phone')
+              .or(`mobile_number.eq.${vendorPhone},owner_phone.eq.${vendorPhone}`)
+              .limit(1);
+            
+            if (!phoneError && shopsByPhone && shopsByPhone.length > 0) {
+              shopId = shopsByPhone[0].id;
+              console.log('✅ Found shop by phone:', shopId, 'Shop:', shopsByPhone[0]);
           } else {
-            console.log('❌ No shop found by email/phone');
+              console.log('❌ No shop found by phone');
+            }
           }
         } else {
           console.log('⚠️  Auth user not found for userId:', userId);
@@ -191,19 +220,26 @@ export const getVendorOrders = async (req, res, next) => {
       }
     }
 
-    // If no shop found, return empty
+    // If no shop found, log detailed error and return empty
     if (!shopId) {
-      console.log('⚠️ No shop found for vendor');
+      console.log('========================================');
+      console.log('⚠️ CRITICAL: No shop found for vendor');
+      console.log('Vendor User ID:', userId);
+      console.log('This might happen if:');
+      console.log('1. Shop was not created during registration');
+      console.log('2. Shop user_id does not match vendor user_id');
+      console.log('3. Shop email/phone does not match vendor email/phone');
+      console.log('========================================');
       return res.json({
         success: true,
         data: [],
       });
     }
 
-    // SIMPLIFIED: Just query orders by shop_id - no user_id checking needed
+    // Query orders by shop_id (use admin client to ensure we get all orders, including new ones)
     console.log('🔍 Querying orders for shop_id:', shopId);
     
-    const ordersResult = await supabase
+    const ordersResult = await supabaseAdmin
       .from('orders')
       .select('*')
       .eq('shop_id', shopId)
@@ -261,20 +297,24 @@ export const getVendorOrderById = async (req, res, next) => {
     console.log('Vendor User ID:', userId);
     console.log('Order ID:', id);
 
-    // Find vendor's shop
+    // Find vendor's shop (use admin client to bypass RLS for new shops)
     let shopId = null;
     
-    // Method 1: Find shop by user_id
-    const { data: shopsByUserId } = await supabase
+    // Method 1: Find shop by user_id (using admin client to bypass RLS)
+    const { data: shopsByUserId, error: userIdError } = await supabaseAdmin
       .from('shops')
-      .select('id, name')
+      .select('id, name, user_id, email, mobile_number')
       .eq('user_id', userId)
       .limit(1);
 
-    if (shopsByUserId && shopsByUserId.length > 0) {
+    if (userIdError) {
+      console.log('⚠️ Error finding shop by user_id:', userIdError.message);
+    } else if (shopsByUserId && shopsByUserId.length > 0) {
       shopId = shopsByUserId[0].id;
-      console.log('✅ Found shop by user_id:', shopId);
+      console.log('✅ Found shop by user_id:', shopId, 'Shop name:', shopsByUserId[0].name);
     } else {
+      console.log('⚠️ No shop found by user_id, trying email/phone lookup...');
+      
       // Method 2: Get vendor's email/phone from auth.users and find shop by email/phone
       try {
         const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
@@ -282,32 +322,76 @@ export const getVendorOrderById = async (req, res, next) => {
           const vendorEmail = authUser.user.email;
           const vendorPhone = authUser.user.phone;
           
-          const { data: shopsByContact } = await supabase
+          console.log('🔍 Trying to find shop by vendor email/phone:', { 
+            email: vendorEmail, 
+            phone: vendorPhone 
+          });
+          
+          // Use admin client to bypass RLS for new shops
+          if (vendorEmail) {
+            const { data: shopsByEmail, error: emailError } = await supabaseAdmin
             .from('shops')
-            .select('id, name')
-            .or(`email.eq.${vendorEmail || ''},mobile_number.eq.${vendorPhone || ''},owner_phone.eq.${vendorPhone || ''}`)
+              .select('id, name, email, mobile_number, owner_phone')
+              .eq('email', vendorEmail)
             .limit(1);
           
-          if (shopsByContact && shopsByContact.length > 0) {
-            shopId = shopsByContact[0].id;
-            console.log('✅ Found shop by email/phone:', shopId);
+            if (!emailError && shopsByEmail && shopsByEmail.length > 0) {
+              shopId = shopsByEmail[0].id;
+              console.log('✅ Found shop by email:', shopId, 'Shop:', shopsByEmail[0]);
+            } else if (vendorPhone) {
+              const { data: shopsByPhone, error: phoneError } = await supabaseAdmin
+                .from('shops')
+                .select('id, name, email, mobile_number, owner_phone')
+                .or(`mobile_number.eq.${vendorPhone},owner_phone.eq.${vendorPhone}`)
+                .limit(1);
+              
+              if (!phoneError && shopsByPhone && shopsByPhone.length > 0) {
+                shopId = shopsByPhone[0].id;
+                console.log('✅ Found shop by phone:', shopId, 'Shop:', shopsByPhone[0]);
+              } else {
+                console.log('❌ No shop found by email or phone');
+              }
+            }
+          } else if (vendorPhone) {
+            const { data: shopsByPhone, error: phoneError } = await supabaseAdmin
+              .from('shops')
+              .select('id, name, email, mobile_number, owner_phone')
+              .or(`mobile_number.eq.${vendorPhone},owner_phone.eq.${vendorPhone}`)
+              .limit(1);
+            
+            if (!phoneError && shopsByPhone && shopsByPhone.length > 0) {
+              shopId = shopsByPhone[0].id;
+              console.log('✅ Found shop by phone:', shopId, 'Shop:', shopsByPhone[0]);
+            } else {
+              console.log('❌ No shop found by phone');
+            }
           }
+        } else {
+          console.log('⚠️  Auth user not found for userId:', userId);
         }
       } catch (err) {
-        console.log('⚠️  Could not get auth user info:', err.message);
+        console.log('⚠️  Error getting auth user info:', err.message);
       }
     }
 
     if (!shopId) {
-      console.log('⚠️ No shop found for vendor');
+      console.log('========================================');
+      console.log('⚠️ CRITICAL: No shop found for vendor');
+      console.log('Vendor User ID:', userId);
+      console.log('Order ID:', id);
+      console.log('This might happen if:');
+      console.log('1. Shop was not created during registration');
+      console.log('2. Shop user_id does not match vendor user_id');
+      console.log('3. Shop email/phone does not match vendor email/phone');
+      console.log('========================================');
       return res.status(404).json({
         success: false,
         error: { message: 'Shop not found for vendor' },
       });
     }
 
-    // Get order and verify it belongs to this shop
-    const orderResult = await supabase
+    // Get order and verify it belongs to this shop (use admin client to ensure we get the order)
+    const orderResult = await supabaseAdmin
       .from('orders')
       .select('*')
       .eq('id', id)
@@ -325,11 +409,11 @@ export const getVendorOrderById = async (req, res, next) => {
     const order = orderResult.data;
     console.log('✅ Order found:', order.order_number);
 
-    // Fetch related data
+    // Fetch related data (use admin client to ensure we get all data, including new orders)
     const [itemsResult, timelineResult, addressResult] = await Promise.all([
-      supabase.from('order_items').select('*').eq('order_id', order.id),
-      supabase.from('order_timeline').select('*').eq('order_id', order.id).order('timestamp', { ascending: true }),
-      order.address_id ? supabase.from('addresses').select('*').eq('id', order.address_id).single() : Promise.resolve({ data: null }),
+      supabaseAdmin.from('order_items').select('*').eq('order_id', order.id),
+      supabaseAdmin.from('order_timeline').select('*').eq('order_id', order.id).order('timestamp', { ascending: true }),
+      order.address_id ? supabaseAdmin.from('addresses').select('*').eq('id', order.address_id).single() : Promise.resolve({ data: null }),
     ]);
 
     // Enrich order items with product details
@@ -393,10 +477,10 @@ async function formatVendorOrdersResponse(orders, req, res) {
     const formattedOrders = await Promise.all(
       orders.map(async (order) => {
         const [itemsResult, timelineResult, shopResult, addressResult] = await Promise.all([
-          supabase.from('order_items').select('*').eq('order_id', order.id),
-          supabase.from('order_timeline').select('*').eq('order_id', order.id).order('timestamp', { ascending: true }),
-          order.shop_id ? supabase.from('shops').select('*').eq('id', order.shop_id).single() : Promise.resolve({ data: null }),
-          order.address_id ? supabase.from('addresses').select('*').eq('id', order.address_id).single() : Promise.resolve({ data: null }),
+          supabaseAdmin.from('order_items').select('*').eq('order_id', order.id),
+          supabaseAdmin.from('order_timeline').select('*').eq('order_id', order.id).order('timestamp', { ascending: true }),
+          order.shop_id ? supabaseAdmin.from('shops').select('*').eq('id', order.shop_id).single() : Promise.resolve({ data: null }),
+          order.address_id ? supabaseAdmin.from('addresses').select('*').eq('id', order.address_id).single() : Promise.resolve({ data: null }),
         ]);
 
         // Enrich order items with product details if image_url is missing

@@ -5,6 +5,7 @@
 import express from 'express';
 import { registerVendor, getVendorProfile, approveVendor, updateShopStatus } from '../controllers/vendorController.js';
 import { getVendorOrders, getVendorOrderById, updateVendorOrderStatus } from '../controllers/ordersController.js';
+import { getVendorNotifications, markNotificationAsRead } from '../controllers/notificationsController.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -26,6 +27,12 @@ router.get('/orders/:id', authenticate, getVendorOrderById);
 
 // Update vendor order status (requires authentication)
 router.patch('/orders/:id/status', authenticate, updateVendorOrderStatus);
+
+// Get vendor notifications (requires authentication)
+router.get('/notifications', authenticate, getVendorNotifications);
+
+// Mark notification as read (requires authentication)
+router.patch('/notifications/:id/read', authenticate, markNotificationAsRead);
 
 // Approve shop (admin only - add admin auth middleware if needed)
 router.post('/approve/:shopId', approveVendor);

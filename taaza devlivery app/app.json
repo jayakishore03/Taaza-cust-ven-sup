@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Taaza Delivery Partner",
+    "slug": "taaza-delivery-partner",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/logom.png",
+    "scheme": "myapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/logom.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-web-browser"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f709e134-5397-4ad3-acf8-0ec8a1eede5e"
+      }
+    },
+    "android": {
+      "package": "com.konapalask.taazadeliverypartner"
+    }
+  }
+}

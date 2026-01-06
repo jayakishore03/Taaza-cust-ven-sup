@@ -64,6 +64,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               errorMsg.includes('Backend configuration error') ||
               errorMsg.includes('missing Supabase') ||
               errorMsg.includes('Server configuration error') ||
+              errorMsg.includes('The server is not properly configured') ||
+              errorMsg.includes('not properly configured') ||
               errorMsg.includes('401') ||
               errorMsg.includes('500');
             
@@ -108,6 +110,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             errorMsg.includes('Backend configuration error') ||
             errorMsg.includes('missing Supabase') ||
             errorMsg.includes('Server configuration error') ||
+            errorMsg.includes('Supabase credentials are invalid or missing') ||
+            errorMsg.includes('Supabase credentials are invalid') ||
+            errorMsg.includes('The server is not properly configured') ||
+            errorMsg.includes('not properly configured') ||
             errorMsg.includes('401');
           
           if (!isExpectedError && __DEV__) {
@@ -154,7 +160,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             errorMsg.includes('Invalid API key') ||
             errorMsg.includes('Backend configuration error') ||
             errorMsg.includes('missing Supabase') ||
-            errorMsg.includes('Server configuration error');
+            errorMsg.includes('Server configuration error') ||
+            errorMsg.includes('The server is not properly configured') ||
+            errorMsg.includes('not properly configured');
           
           if (!isExpectedError && __DEV__) {
             // Only log unexpected errors in development
@@ -186,10 +194,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // This prevents sign-in from appearing to fail when it actually succeeded
           const errorMsg = profileError?.message || '';
           
-          // Only log if it's not an expected auth error (which we suppress)
-          if (!errorMsg.includes('Session expired') && 
-              !errorMsg.includes('Invalid API key') &&
-              !errorMsg.includes('No token')) {
+          // Only log if it's not an expected auth error or backend config error (which we suppress)
+          const isExpectedError = 
+            errorMsg.includes('Session expired') || 
+            errorMsg.includes('Invalid API key') ||
+            errorMsg.includes('No token') ||
+            errorMsg.includes('Backend configuration error') ||
+            errorMsg.includes('Server configuration error') ||
+            errorMsg.includes('The server is not properly configured') ||
+            errorMsg.includes('not properly configured') ||
+            errorMsg.includes('Supabase credentials are invalid or missing') ||
+            errorMsg.includes('Supabase credentials are invalid');
+          
+          if (!isExpectedError) {
             console.warn('Profile fetch failed after sign-in, using sign-in data:', errorMsg);
           }
           
@@ -344,7 +361,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       // Handle API key errors (backend configuration issue)
       if (errorMsg.includes('Invalid API key') || errorMsg.includes('Backend configuration error') ||
-          errorMsg.includes('Server configuration error') || errorMsg.includes('missing Supabase')) {
+          errorMsg.includes('Server configuration error') || errorMsg.includes('missing Supabase') ||
+          errorMsg.includes('The server is not properly configured') || errorMsg.includes('not properly configured')) {
         throw new Error('Server configuration error. The backend server is not properly configured. Please contact support.');
       }
       
@@ -365,6 +383,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         errorMsg.includes('Invalid API key') ||
         errorMsg.includes('Backend configuration error') ||
         errorMsg.includes('Server configuration error') ||
+        errorMsg.includes('The server is not properly configured') ||
+        errorMsg.includes('not properly configured') ||
         errorMsg.includes('User not authenticated') ||
         errorMsg.includes('Cannot connect') ||
         errorMsg.includes('timeout') ||
@@ -430,6 +450,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         errorMsg.includes('session has expired') ||
         errorMsg.includes('Invalid API key') ||
         errorMsg.includes('Backend configuration error') ||
+        errorMsg.includes('Server configuration error') ||
+        errorMsg.includes('The server is not properly configured') ||
+        errorMsg.includes('not properly configured') ||
         errorMsg.includes('User not authenticated');
       
       if (!isExpectedError && __DEV__) {
@@ -445,7 +468,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       // Handle API key errors (backend configuration issue)
-      if (errorMsg.includes('Invalid API key') || errorMsg.includes('Backend configuration error')) {
+      if (errorMsg.includes('Invalid API key') || errorMsg.includes('Backend configuration error') ||
+          errorMsg.includes('The server is not properly configured') || errorMsg.includes('not properly configured')) {
         throw new Error('Server configuration error. Please contact support or try again later.');
       }
       
@@ -487,6 +511,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         errorMsg.includes('session has expired') ||
         errorMsg.includes('Invalid API key') ||
         errorMsg.includes('Backend configuration error') ||
+        errorMsg.includes('Server configuration error') ||
+        errorMsg.includes('The server is not properly configured') ||
+        errorMsg.includes('not properly configured') ||
         errorMsg.includes('User not authenticated');
       
       if (!isExpectedError && __DEV__) {
@@ -502,7 +529,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       // Handle API key errors (backend configuration issue)
-      if (errorMsg.includes('Invalid API key') || errorMsg.includes('Backend configuration error')) {
+      if (errorMsg.includes('Invalid API key') || errorMsg.includes('Backend configuration error') ||
+          errorMsg.includes('The server is not properly configured') || errorMsg.includes('not properly configured')) {
         throw new Error('Server configuration error. Please contact support or try again later.');
       }
       
@@ -544,6 +572,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         errorMsg.includes('session has expired') ||
         errorMsg.includes('Invalid API key') ||
         errorMsg.includes('Backend configuration error') ||
+        errorMsg.includes('Server configuration error') ||
+        errorMsg.includes('The server is not properly configured') ||
+        errorMsg.includes('not properly configured') ||
         errorMsg.includes('User not authenticated');
       
       if (!isExpectedError && __DEV__) {
@@ -559,7 +590,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       // Handle API key errors (backend configuration issue)
-      if (errorMsg.includes('Invalid API key') || errorMsg.includes('Backend configuration error')) {
+      if (errorMsg.includes('Invalid API key') || errorMsg.includes('Backend configuration error') ||
+          errorMsg.includes('The server is not properly configured') || errorMsg.includes('not properly configured')) {
         throw new Error('Server configuration error. Please contact support or try again later.');
       }
       

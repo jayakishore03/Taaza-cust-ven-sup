@@ -3,16 +3,57 @@
 
 // Log environment variables status (without exposing secrets)
 console.log('🔍 Environment Check on Function Start:');
-console.log('  SUPABASE_URL:', process.env.SUPABASE_URL ? `✅ SET (${process.env.SUPABASE_URL.substring(0, 30)}...)` : '❌ MISSING');
-console.log('  SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? `✅ SET (${process.env.SUPABASE_ANON_KEY.substring(0, 20)}...)` : '❌ MISSING');
-console.log('  SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? `✅ SET (${process.env.SUPABASE_SERVICE_ROLE_KEY.substring(0, 20)}...)` : '❌ MISSING');
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+// Detailed URL validation and logging
+if (supabaseUrl) {
+  const trimmed = supabaseUrl.trim();
+  const length = trimmed.length;
+  const startsWithHttps = trimmed.startsWith('https://');
+  const isValidFormat = /^https:\/\/[a-zA-Z0-9.-]+\.supabase\.co$/.test(trimmed);
+  
+  console.log('  SUPABASE_URL: ✅ SET');
+  console.log(`    Length: ${length} characters`);
+  console.log(`    Starts with https://: ${startsWithHttps ? '✅' : '❌'}`);
+  console.log(`    Valid format: ${isValidFormat ? '✅' : '❌'}`);
+  console.log(`    Preview: ${trimmed.substring(0, 50)}${length > 50 ? '...' : ''}`);
+  console.log(`    First 20 chars: "${trimmed.substring(0, 20)}"`);
+  console.log(`    Last 20 chars: "${trimmed.substring(Math.max(0, length - 20))}"`);
+  
+  // Check for common issues
+  if (trimmed !== supabaseUrl) {
+    console.log('    ⚠️  WARNING: URL has leading/trailing whitespace!');
+  }
+  if (!startsWithHttps) {
+    console.log('    ❌ ERROR: URL does not start with https://');
+  }
+  if (!isValidFormat) {
+    console.log('    ❌ ERROR: URL format is invalid');
+  }
+} else {
+  console.log('  SUPABASE_URL: ❌ MISSING');
+}
+
+console.log('  SUPABASE_ANON_KEY:', supabaseAnonKey ? `✅ SET (${supabaseAnonKey.substring(0, 20)}...)` : '❌ MISSING');
+console.log('  SUPABASE_SERVICE_ROLE_KEY:', supabaseServiceRoleKey ? `✅ SET (${supabaseServiceRoleKey.substring(0, 20)}...)` : '❌ MISSING');
 console.log('  NODE_ENV:', process.env.NODE_ENV || 'not set');
 
-// If environment variables are missing, log a warning
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+// If environment variables are missing or invalid, log a warning
+if (!supabaseUrl || !supabaseAnonKey) {
   console.error('⚠️  WARNING: Supabase environment variables are missing!');
   console.error('   This will cause "Invalid API key" errors.');
   console.error('   Please check Vercel Dashboard → Settings → Environment Variables');
+} else {
+  const trimmedUrl = supabaseUrl.trim();
+  const isValidUrl = /^https:\/\/[a-zA-Z0-9.-]+\.supabase\.co$/.test(trimmedUrl);
+  if (!isValidUrl) {
+    console.error('⚠️  WARNING: SUPABASE_URL format is invalid!');
+    console.error(`   Current value: "${trimmedUrl}"`);
+    console.error('   Expected format: https://your-project.supabase.co');
+    console.error('   Please check Vercel Dashboard → Settings → Environment Variables');
+  }
 }
 
 let app;

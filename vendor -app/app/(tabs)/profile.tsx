@@ -24,12 +24,14 @@ import {
   Shield,
   LogOut,
   CreditCard as Edit,
+  CreditCard,
   Save,
   Lock,
   HelpCircle,
   X,
   Eye,
   EyeOff,
+  FileText,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
@@ -374,6 +376,36 @@ export default function ProfileScreen() {
               />
             </View>
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => router.push('/documents')}
+          >
+            <FileText size={24} color="#111111" />
+            <View style={styles.actionContent}>
+              <Text style={styles.actionTitle}>Uploaded Documents</Text>
+              <Text style={styles.actionSubtitle}>
+                View and manage your uploaded business documents
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => router.push('/banking')}
+          >
+            <CreditCard size={24} color="#111111" />
+            <View style={styles.actionContent}>
+              <Text style={styles.actionTitle}>Banking Information</Text>
+              <Text style={styles.actionSubtitle}>
+                Manage payment and banking details
+              </Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.section}>
@@ -727,6 +759,30 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#111111',
     marginLeft: 16,
+  },
+  actionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  actionContent: {
+    marginLeft: 16,
+    flex: 1,
+  },
+  actionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111111',
+    marginBottom: 4,
+  },
+  actionSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
   },
   logoutButton: {
     flexDirection: 'row',

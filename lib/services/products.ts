@@ -77,7 +77,7 @@ export async function getAllProducts(): Promise<Product[]> {
       .eq('is_available', true)
       .not('shop_id', 'is', null) // Only show products that belong to a vendor
       .gt('price_per_kg', 0) // Only show products where vendor has set a price
-      .order('created_at', { ascending: false });
+      .order('updated_at', { ascending: false }); // Recently updated products first
 
     if (error) {
       console.error('[Products] Error fetching all products:', error);
@@ -142,7 +142,7 @@ export async function getProductsByCategory(
       // Don't require shop_id or price_per_kg > 0 when filtering by shop type
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const { data, error } = await query.order('updated_at', { ascending: false }); // Recently updated products first
 
     if (error) {
       console.error('[Products] Error fetching products by category:', error);
@@ -163,7 +163,7 @@ export async function getProductsByCategory(
           .eq('is_available', true)
           .not('shop_id', 'is', null) // Only show products that belong to a vendor
           .gt('price_per_kg', 0) // Still filter for products with prices
-          .order('created_at', { ascending: false });
+          .order('updated_at', { ascending: false }); // Recently updated products first
         
         const { data: fallbackData, error: fallbackError } = await fallbackQuery;
         if (fallbackError) {
@@ -241,7 +241,7 @@ export async function getProductsByCategory(
         .from('products')
         .select('id, name, category, shop_id, price_per_kg, is_available')
         .eq('category', category)
-        .order('created_at', { ascending: false });
+        .order('updated_at', { ascending: false }); // Recently updated products first
       
       if (allCategoryProductsCheck.data && allCategoryProductsCheck.data.length > 0) {
         console.log(`[Products] Found ${allCategoryProductsCheck.data.length} total products in category "${category}" in database`);
@@ -313,29 +313,102 @@ export async function getProductById(id: string): Promise<Product | null> {
 
 /**
  * Get products by shop ID
- * Only returns products where vendor has set a price (price_per_kg > 0)
+ * Only returns products where vendor has set a price (price_per_kg > 0) AND is_available = true
+ * This ensures only products that vendors have enabled are shown to customers
  */
 export async function getProductsByShop(shopId: string): Promise<Product[]> {
-  const { data, error } = await supabase
-    .from('products')
-    .select('*')
-    .eq('shop_id', shopId)
-    .eq('is_available', true)
-    .gt('price_per_kg', 0) // Only show products where vendor has set a price
-    .order('created_at', { ascending: false });
+  try {
+    console.log('[getProductsByShop] Fetching products for shop_id:', shopId);
+    
+    // First, check if Supabase client is working
+    const testQuery = supabase.from('products').select('count', { count: 'exact', head: true });
+    const testResult = await testQuery;
+    console.log('[getProductsByShop] Supabase connection test:', testResult);
+    
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('shop_id', shopId)
+      .eq('is_available', true) // Only show products that vendor has made available
+      .gt('price_per_kg', 0) // Only show products where vendor has set a price
+      .order('updated_at', { ascending: false }); // Recently updated products first
 
-  if (error) {
-    console.error('Error fetching products by shop:', error);
-    throw error;
+    if (error) {
+      console.error('[getProductsByShop] Error fetching products by shop:', error);
+      console.error('[getProductsByShop] Error details:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+      
+      // Try a more lenient query to see what products exist
+      console.log('[getProductsByShop] Trying lenient query to check what products exist...');
+      const lenientQuery = await supabase
+        .from('products')
+        .select('id, name, shop_id, is_available, price_per_kg, category')
+        .eq('shop_id', shopId)
+        .order('updated_at', { ascending: false });
+      
+      if (lenientQuery.data && lenientQuery.data.length > 0) {
+        console.log(`[getProductsByShop] Found ${lenientQuery.data.length} products for shop_id "${shopId}" (without filters):`);
+        lenientQuery.data.forEach((p: any) => {
+          console.log(`  - "${p.name}": is_available=${p.is_available}, price_per_kg=${p.price_per_kg}, category=${p.category}`);
+        });
+        
+        const availableWithPrice = lenientQuery.data.filter((p: any) => 
+          p.is_available === true && typeof p.price_per_kg === 'number' && p.price_per_kg > 0
+        );
+        console.log(`[getProductsByShop] Products that meet criteria (is_available=true, price_per_kg>0): ${availableWithPrice.length}`);
+        
+        if (availableWithPrice.length === 0) {
+          const notAvailable = lenientQuery.data.filter((p: any) => p.is_available !== true);
+          const noPrice = lenientQuery.data.filter((p: any) => !p.price_per_kg || p.price_per_kg <= 0);
+          console.log(`[getProductsByShop] Breakdown: ${notAvailable.length} not available, ${noPrice.length} without price`);
+        }
+      } else {
+        console.log(`[getProductsByShop] No products found for shop_id "${shopId}" at all.`);
+        
+        // Check if shop_id exists in shops table
+        const shopCheck = await supabase
+          .from('shops')
+          .select('id, name')
+          .eq('id', shopId)
+          .single();
+        
+        if (shopCheck.error) {
+          console.error('[getProductsByShop] Shop not found:', shopCheck.error);
+        } else {
+          console.log('[getProductsByShop] Shop exists:', shopCheck.data);
+        }
+      }
+      
+      throw error;
+    }
+
+    console.log(`[getProductsByShop] Raw query returned ${data?.length || 0} products`);
+
+    // Filter products to ensure they have shop_id, is_available = true, and price_per_kg > 0
+    const filteredData = (data || []).filter((p: any) => {
+      return p.shop_id !== null && p.shop_id !== undefined && 
+             p.is_available === true &&
+             typeof p.price_per_kg === 'number' && p.price_per_kg > 0;
+    });
+    
+    console.log(`[getProductsByShop] After filtering: ${filteredData.length} products`);
+    
+    if (filteredData.length === 0 && data && data.length > 0) {
+      console.warn(`[getProductsByShop] Filtered out ${data.length - filteredData.length} products that don't meet criteria`);
+    }
+    
+    const products = filteredData.map(dbProductToAppProduct);
+    console.log(`[getProductsByShop] ✅ Returning ${products.length} products`);
+    return products;
+  } catch (error: any) {
+    console.error('[getProductsByShop] Exception:', error);
+    // Return empty array instead of throwing to prevent app crash
+    return [];
   }
-
-  // Filter products to ensure they have shop_id and price_per_kg > 0
-  const filteredData = (data || []).filter((p: any) => {
-    return p.shop_id !== null && p.shop_id !== undefined && 
-           typeof p.price_per_kg === 'number' && p.price_per_kg > 0;
-  });
-  
-  return filteredData.map(dbProductToAppProduct);
 }
 
 /**
@@ -350,7 +423,7 @@ export async function searchProducts(query: string): Promise<Product[]> {
     .not('shop_id', 'is', null) // Only show products that belong to a vendor
     .gt('price_per_kg', 0) // Only show products where vendor has set a price
     .ilike('name', `%${query}%`)
-    .order('created_at', { ascending: false });
+    .order('updated_at', { ascending: false }); // Recently updated products first
 
   if (error) {
     console.error('Error searching products:', error);

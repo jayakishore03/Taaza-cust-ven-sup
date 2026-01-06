@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, ActivityIndicator, TextInput, RefreshControl } from 'react-native';
-import React, { useState, useEffect, useCallback } from 'react';
-import { MapPin, RefreshCw, Search, X } from 'lucide-react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { MapPin, RefreshCw, Search, X, ArrowLeft } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -55,6 +55,30 @@ const getAvailableCategories = (shopType: string | undefined): string[] => {
   return ['All', category];
 };
 
+// Helper function to parse distance string and convert to kilometers
+const parseDistanceToKm = (distanceStr: string | undefined): number => {
+  if (!distanceStr) return Infinity;
+  
+  // Remove any extra spaces and convert to lowercase
+  const cleanDistance = distanceStr.trim().toLowerCase();
+  
+  // Check if it's in meters (e.g., "500 m", "1.5 m")
+  if (cleanDistance.includes('m') && !cleanDistance.includes('km')) {
+    const meters = parseFloat(cleanDistance.replace(' m', '').replace('m', ''));
+    return isNaN(meters) ? Infinity : meters / 1000; // Convert to km
+  }
+  
+  // Check if it's in kilometers (e.g., "5.2 km", "10 km")
+  if (cleanDistance.includes('km')) {
+    const km = parseFloat(cleanDistance.replace(' km', '').replace('km', ''));
+    return isNaN(km) ? Infinity : km;
+  }
+  
+  // Try to parse as number (assume km if no unit)
+  const num = parseFloat(cleanDistance);
+  return isNaN(num) ? Infinity : num;
+};
+
 export default function HomeScreen() {
   const [selectedCategory, setSelectedCategory] = useState('All'); // Default to "All" to show all products
   const [location, setLocation] = useState<string>('Fetching location...');
@@ -70,6 +94,8 @@ export default function HomeScreen() {
   const { getProductsByShopType, isLoading: isLoadingAllProducts, refreshProducts, isRefreshing } = useProducts();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const realtimeSubscriptionRef = useRef<any>(null);
+  const productsPollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Set API token when user is authenticated
   useEffect(() => {
@@ -240,7 +266,7 @@ export default function HomeScreen() {
     fetchShops(false);
   }, []); // Only run on mount
 
-  // Refresh shops when screen comes into focus (to get updated shop status)
+  // Refresh shops and products when screen comes into focus (to get updated data)
   useFocusEffect(
     useCallback(() => {
       // Refresh shops when screen comes into focus
@@ -250,7 +276,23 @@ export default function HomeScreen() {
       } else {
         fetchShops(false);
       }
-    }, [userCoordinates])
+      
+      // Refresh products for selected shop when screen comes into focus
+      // This ensures products are updated when vendor makes changes
+      if (selectedShop) {
+        const refreshProducts = async () => {
+          try {
+            const { getProductsByShop } = await import('../../lib/services/products');
+            const updatedProducts = await getProductsByShop(selectedShop.id);
+            setProducts(updatedProducts);
+            console.log('[HomeScreen] ✅ Products refreshed on focus:', updatedProducts.length, 'products');
+          } catch (error) {
+            console.error('[HomeScreen] Error refreshing products on focus:', error);
+          }
+        };
+        refreshProducts();
+      }
+    }, [userCoordinates, selectedShop])
   );
 
   // Re-fetch shops when coordinates become available to update distances
@@ -272,34 +314,182 @@ export default function HomeScreen() {
     }
   }, [shops, isLoadingShops]);
 
-  // Load products when shop changes - INSTANT using cached products
+  // Load products when shop changes - Fetch shop-specific products with realtime updates
   useEffect(() => {
-    if (!selectedShop) {
-      setProducts([]);
-      return;
+    const loadShopProducts = async () => {
+      if (!selectedShop) {
+        setProducts([]);
+        return;
+      }
+      
+      try {
+        setIsLoadingProducts(true);
+        const startTime = Date.now();
+        
+        console.log('[HomeScreen] Loading products for shop:', selectedShop.id, selectedShop.name);
+        console.log('[HomeScreen] Shop details:', {
+          id: selectedShop.id,
+          name: selectedShop.name,
+          shopType: selectedShop.vendor?.shopType,
+        });
+        
+        // Get products for this specific shop (filtered by shop_id) from Supabase service
+        const { getProductsByShop } = await import('../../lib/services/products');
+        const shopProducts = await getProductsByShop(selectedShop.id);
+        
+        const loadTime = Date.now() - startTime;
+        console.log(`[HomeScreen] ⚡ Products loaded in ${loadTime}ms (${shopProducts.length} products)`);
+        
+        if (shopProducts.length === 0) {
+          console.warn('[HomeScreen] ⚠️ No products found for shop:', selectedShop.name);
+          console.warn('[HomeScreen] Possible reasons:');
+          console.warn('  1. Products not assigned to this shop (shop_id mismatch)');
+          console.warn('  2. Products have is_available = false');
+          console.warn('  3. Products have price_per_kg = 0 or null');
+          console.warn('  4. Products not synced from base products to this shop');
+        }
+        
+        // Log prices for verification
+        if (__DEV__ && shopProducts.length > 0) {
+          shopProducts.slice(0, 5).forEach((product) => {
+            console.log(`[HomeScreen] Product: ${product.name} - Category: ${product.category} - Price: ₹${product.price} (₹${product.pricePerKg}/kg)`);
+          });
+        }
+        
+        setProducts(shopProducts);
+      } catch (error: any) {
+        console.error('[HomeScreen] ❌ Error loading shop products:', error);
+        console.error('[HomeScreen] Error details:', {
+          message: error?.message,
+          code: error?.code,
+          stack: error?.stack,
+        });
+        
+        // Show user-friendly error message
+        if (__DEV__) {
+          Alert.alert(
+            'Error Loading Products',
+            `Failed to load products for ${selectedShop?.name || 'this shop'}. Check console for details.`,
+            [{ text: 'OK' }]
+          );
+        }
+        
+        setProducts([]);
+      } finally {
+        setIsLoadingProducts(false);
+      }
+    };
+
+    loadShopProducts();
+
+    // Set up realtime subscription for instant updates when vendor changes products
+    if (selectedShop) {
+      // Clean up previous subscription if exists
+      if (realtimeSubscriptionRef.current) {
+        console.log('[HomeScreen] Cleaning up previous realtime subscription');
+        realtimeSubscriptionRef.current.unsubscribe();
+        realtimeSubscriptionRef.current = null;
+      }
+
+      // Clean up previous polling if exists
+      if (productsPollingIntervalRef.current) {
+        clearInterval(productsPollingIntervalRef.current);
+        productsPollingIntervalRef.current = null;
+      }
+
+      // Set up new subscription asynchronously
+      (async () => {
+        try {
+          const { supabase } = await import('../../lib/supabase');
+          
+          console.log('[HomeScreen] Setting up realtime subscription for shop:', selectedShop.id);
+          
+          // Subscribe to product changes for this shop
+          const subscription = supabase
+            .channel(`shop-products-${selectedShop.id}`)
+            .on(
+              'postgres_changes',
+              {
+                event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+                schema: 'public',
+                table: 'products',
+                filter: `shop_id=eq.${selectedShop.id}`, // Only listen to this shop's products
+              },
+              async (payload) => {
+                console.log('[HomeScreen] 🔔 Realtime product change detected:', payload.eventType);
+                
+                // Immediately reload products when any change is detected
+                try {
+                  const { getProductsByShop } = await import('../../lib/services/products');
+                  const updatedProducts = await getProductsByShop(selectedShop.id);
+                  setProducts(updatedProducts);
+                  console.log('[HomeScreen] ✅ Products updated instantly in realtime:', updatedProducts.length, 'products');
+                } catch (error) {
+                  console.error('[HomeScreen] Error reloading products after realtime update:', error);
+                }
+              }
+            )
+            .subscribe((status) => {
+              console.log('[HomeScreen] Realtime subscription status:', status);
+              if (status === 'SUBSCRIBED') {
+                console.log('[HomeScreen] ✅ Realtime subscription active');
+              } else if (status === 'CHANNEL_ERROR') {
+                console.warn('[HomeScreen] ⚠️ Realtime subscription error, falling back to polling');
+              }
+            });
+
+          realtimeSubscriptionRef.current = subscription;
+
+          // Set up polling as backup (every 2 seconds) to ensure updates are received
+          // This ensures changes reflect even if realtime doesn't work
+          productsPollingIntervalRef.current = setInterval(async () => {
+            try {
+              const { getProductsByShop } = await import('../../lib/services/products');
+              const updatedProducts = await getProductsByShop(selectedShop.id);
+              setProducts(prevProducts => {
+                // Only update if products actually changed (to avoid unnecessary re-renders)
+                const prevIds = prevProducts.map(p => `${p.id}-${p.pricePerKg}-${p.price}`).sort().join(',');
+                const newIds = updatedProducts.map(p => `${p.id}-${p.pricePerKg}-${p.price}`).sort().join(',');
+                if (prevIds !== newIds) {
+                  console.log('[HomeScreen] 🔄 Products changed detected via polling, updating...');
+                  return updatedProducts;
+                }
+                return prevProducts;
+              });
+            } catch (error) {
+              console.error('[HomeScreen] Error polling products:', error);
+            }
+          }, 2000); // Poll every 2 seconds
+        } catch (error) {
+          console.error('[HomeScreen] Error setting up realtime subscription:', error);
+        }
+      })();
+    } else {
+      // Clean up subscription if no shop is selected
+      if (realtimeSubscriptionRef.current) {
+        console.log('[HomeScreen] Cleaning up realtime subscription (no shop selected)');
+        realtimeSubscriptionRef.current.unsubscribe();
+        realtimeSubscriptionRef.current = null;
+      }
+      if (productsPollingIntervalRef.current) {
+        clearInterval(productsPollingIntervalRef.current);
+        productsPollingIntervalRef.current = null;
+      }
     }
-    
-    // INSTANT: Get products from cache (no API call, no delay!)
-    const startTime = Date.now();
-    const shopType = selectedShop.vendor?.shopType || 'chicken';
-    
-    console.log('[HomeScreen] Loading products for shop type:', shopType);
-    
-    // Get products instantly from cache
-    const cachedProducts = getProductsByShopType(shopType);
-    
-    const loadTime = Date.now() - startTime;
-    console.log(`[HomeScreen] ⚡ Products loaded INSTANTLY in ${loadTime}ms (${cachedProducts.length} products)`);
-    
-    // Log prices for verification
-    if (__DEV__ && cachedProducts.length > 0) {
-      cachedProducts.slice(0, 5).forEach((product) => {
-        console.log(`[HomeScreen] Product: ${product.name} - Category: ${product.category} - Price: ₹${product.price} (₹${product.pricePerKg}/kg)`);
-      });
-    }
-    
-    setProducts(cachedProducts);
-  }, [selectedShop, getProductsByShopType]);
+
+    // Cleanup subscription and polling when shop changes or component unmounts
+    return () => {
+      if (realtimeSubscriptionRef.current) {
+        console.log('[HomeScreen] Cleaning up realtime subscription for shop:', selectedShop?.id);
+        realtimeSubscriptionRef.current.unsubscribe();
+        realtimeSubscriptionRef.current = null;
+      }
+      if (productsPollingIntervalRef.current) {
+        clearInterval(productsPollingIntervalRef.current);
+        productsPollingIntervalRef.current = null;
+      }
+    };
+  }, [selectedShop]);
 
   // Get location on component mount
   useEffect(() => {
@@ -372,6 +562,19 @@ export default function HomeScreen() {
     return product.category === selectedCategory;
   });
 
+  // Filter shops to only show those within 10km and sort by distance (closest first)
+  const nearbyShops = shops
+    .filter((shop) => {
+      const distanceKm = parseDistanceToKm(shop.distance);
+      return distanceKm <= 10; // Only show shops within 10km
+    })
+    .sort((a, b) => {
+      // Sort by distance in ascending order (closest first)
+      const distanceA = parseDistanceToKm(a.distance);
+      const distanceB = parseDistanceToKm(b.distance);
+      return distanceA - distanceB;
+  });
+
   return (
     <View style={styles.container}>
       <ScrollView 
@@ -386,6 +589,15 @@ export default function HomeScreen() {
         }
       >
         <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+          {selectedShop ? (
+            <View style={styles.headerWithBack}>
+              <TouchableOpacity 
+                style={styles.backButton}
+                onPress={handleChangeShop}
+                activeOpacity={0.7}
+              >
+                <ArrowLeft size={24} color="#DC2626" strokeWidth={2} />
+              </TouchableOpacity>
           <TouchableOpacity 
             style={styles.locationBar}
             onPress={handleLocationPress}
@@ -407,6 +619,30 @@ export default function HomeScreen() {
               </Text>
             </View>
           </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity 
+              style={styles.locationBar}
+              onPress={handleLocationPress}
+              activeOpacity={0.8}
+            >
+              <MapPin size={20} color="#FFFFFF" strokeWidth={2} />
+              <View style={styles.locationText}>
+                <View style={styles.locationLabelRow}>
+                  <Text style={styles.deliveryLabel}>Deliver to</Text>
+                  {isLoadingLocation && (
+                    <ActivityIndicator size="small" color="#FFFFFF" style={styles.loadingIndicator} />
+                  )}
+                  {!isLoadingLocation && (
+                    <RefreshCw size={14} color="#FEE2E2" strokeWidth={2} style={styles.refreshIcon} />
+                  )}
+                </View>
+                <Text style={styles.address} numberOfLines={1}>
+                  {location}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.banner}>
@@ -441,20 +677,26 @@ export default function HomeScreen() {
                   <Text style={styles.loadingText}>Loading shops...</Text>
                 </View>
               )}
-              {!isLoadingShops && shops.length === 0 && (
+              {!isLoadingShops && nearbyShops.length === 0 && (
                 <View style={styles.emptyContainer}>
-                  <Text style={styles.emptyText}>No shops available at the moment</Text>
-                  <Text style={[styles.emptyText, { fontSize: 12, marginTop: 8 }]}>
-                    Please check your connection or try again later
+                  <View style={styles.emptyIconContainer}>
+                    <MapPin size={48} color="#DC2626" strokeWidth={1.5} />
+                  </View>
+                  <Text style={styles.emptyTitle}>No shops nearby</Text>
+                  <Text style={styles.emptyMessage}>
+                    We're expanding our delivery network! More shops are coming to your area soon.
                   </Text>
-                  {__DEV__ && (
-                    <Text style={[styles.emptyText, { fontSize: 10, marginTop: 4, color: '#DC2626' }]}>
-                      Debug: shops.length = {shops.length}, isLoadingShops = {String(isLoadingShops)}
+                  <Text style={styles.emptySubtext}>
+                    Check back later or explore shops in nearby areas
+                  </Text>
+                  {__DEV__ && shops.length > 0 && (
+                    <Text style={[styles.emptyText, { fontSize: 10, marginTop: 8, color: '#9CA3AF' }]}>
+                      Debug: {shops.length} total shops, {nearbyShops.length} within 10km
                     </Text>
                   )}
                 </View>
               )}
-              {!isLoadingShops && shops.length > 0 && shops.map((shop) => (
+              {!isLoadingShops && nearbyShops.length > 0 && nearbyShops.map((shop) => (
                 <TouchableOpacity
                   key={shop.id}
                   style={styles.shopCard}
@@ -684,6 +926,24 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 20,
     paddingTop: 10,
+  },
+  headerWithBack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   locationBar: {
     flexDirection: 'row',
@@ -1069,6 +1329,38 @@ const styles = StyleSheet.create({
     padding: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 200,
+  },
+  emptyIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#FEE2E2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1F2937',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  emptyMessage: {
+    fontSize: 15,
+    color: '#4B5563',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 8,
+    paddingHorizontal: 20,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: 20,
   },
   emptyText: {
     fontSize: 14,

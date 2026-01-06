@@ -6,8 +6,9 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Animated,
 } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ChevronLeft, Circle, CheckCircle2, Package, Truck, Home, Clock, CheckCircle, Phone, User } from 'lucide-react-native';
@@ -44,69 +45,62 @@ const ORDER_STAGES = [
   },
 ];
 
-// Helper function to get all stages up to current status
+// Helper function to get all stages (always show all 4 stages)
 function getOrderStages(currentStatus: string, timeline: OrderTimelineEvent[] = []) {
-  // Always include "Order Placed" as the first stage and mark it as completed
-  const stagesToShow: typeof ORDER_STAGES = [];
-  
-  // Always add "Order Placed" as completed
-  const orderPlacedStage = ORDER_STAGES.find(s => s.stage === 'Order Placed');
-  if (orderPlacedStage) {
-    const timelineEvent = timeline?.find(e => e.stage === 'Order Placed');
-    stagesToShow.push({
-      ...orderPlacedStage,
-      timestamp: timelineEvent?.timestamp || null,
-      isCompleted: true, // Always completed when order exists
-    });
-  }
-  
   // Map status to timeline stages (handle statuses not in ORDER_STAGES)
   const statusToStageMap: Record<string, string> = {
     'Preparing': 'Order Ready', // Map Preparing to Order Ready
+    'Order Ready': 'Order Ready',
+    'Ready': 'Order Ready',
     'Picked Up': 'Out for Delivery', // Map Picked Up to Out for Delivery
+    'Out for Delivery': 'Out for Delivery',
+    'Delivered': 'Delivered',
   };
   
   // Get the effective status for timeline display
   const effectiveStatus = statusToStageMap[currentStatus] || currentStatus;
   
-  // If we have timeline events, use them for other stages
-  if (timeline && timeline.length > 0) {
-    ORDER_STAGES.forEach(stage => {
-      if (stage.stage === 'Order Placed') return; // Already added
-      
-      const timelineEvent = timeline.find(e => e.stage === stage.stage);
-      const stageIndex = ORDER_STAGES.findIndex(s => s.stage === stage.stage);
-      const currentIndex = ORDER_STAGES.findIndex(s => s.stage === effectiveStatus);
-      
-      // Show stage if it's up to and including current status
-      if (stageIndex <= currentIndex) {
-        stagesToShow.push({
-        ...stage,
-        timestamp: timelineEvent?.timestamp || null,
-        isCompleted: timelineEvent?.isCompleted || false,
-        });
+  // Always return all 4 stages
+  return ORDER_STAGES.map((stage) => {
+    const timelineEvent = timeline?.find(e => e.stage === stage.stage);
+    const stageIndex = ORDER_STAGES.findIndex(s => s.stage === stage.stage);
+    const currentIndex = ORDER_STAGES.findIndex(s => s.stage === effectiveStatus);
+    
+    // Determine if stage is completed, current, or inactive
+    let isCompleted = false;
+    let isCurrent = false;
+    let isInactive = false;
+    
+    if (timelineEvent) {
+      // Use timeline data if available
+      isCompleted = timelineEvent.isCompleted || false;
+      isCurrent = stage.stage === effectiveStatus && !isCompleted;
+    } else {
+      // Fallback logic
+      if (stageIndex < currentIndex) {
+        isCompleted = true;
+      } else if (stageIndex === currentIndex) {
+        isCurrent = true;
+      } else {
+        isInactive = true;
       }
-    });
-  } else {
-    // Fallback: return stages up to current status
-    const statusIndex = ORDER_STAGES.findIndex(s => s.stage === effectiveStatus);
-    if (statusIndex === -1) {
-      // If status not found, just show "Order Placed"
-      return stagesToShow;
     }
     
-    // Add stages up to current status
-    ORDER_STAGES.slice(1, statusIndex + 1).forEach(stage => {
-      const stageIndex = ORDER_STAGES.findIndex(s => s.stage === stage.stage);
-      stagesToShow.push({
-        ...stage,
-        timestamp: null,
-        isCompleted: stageIndex < statusIndex,
-      });
-    });
-  }
-  
-  return stagesToShow;
+    // Special case: Order Placed is always completed when order exists
+    if (stage.stage === 'Order Placed') {
+      isCompleted = true;
+      isCurrent = false;
+      isInactive = false;
+    }
+    
+    return {
+      ...stage,
+      timestamp: timelineEvent?.timestamp || null,
+      isCompleted,
+      isCurrent,
+      isInactive,
+    };
+  });
 }
 
 // Helper function to check if stage is completed
@@ -119,7 +113,11 @@ function isStageCompleted(stage: string, currentStatus: string, timeline: OrderT
   // Map status to timeline stages
   const statusToStageMap: Record<string, string> = {
     'Preparing': 'Order Ready',
+    'Order Ready': 'Order Ready',
+    'Ready': 'Order Ready',
     'Picked Up': 'Out for Delivery',
+    'Out for Delivery': 'Out for Delivery',
+    'Delivered': 'Delivered',
   };
   const effectiveStatus = statusToStageMap[currentStatus] || currentStatus;
   
@@ -142,7 +140,11 @@ function isCurrentStage(stage: string, currentStatus: string) {
   // Map status to timeline stages
   const statusToStageMap: Record<string, string> = {
     'Preparing': 'Order Ready',
+    'Order Ready': 'Order Ready',
+    'Ready': 'Order Ready',
     'Picked Up': 'Out for Delivery',
+    'Out for Delivery': 'Out for Delivery',
+    'Delivered': 'Delivered',
   };
   const effectiveStatus = statusToStageMap[currentStatus] || currentStatus;
   return stage === effectiveStatus;
@@ -203,6 +205,17 @@ export default function OrderTrackingScreen() {
   const { user } = useAuth();
   const [order, setOrder] = useState<OrderSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [previousStatus, setPreviousStatus] = useState<string | null>(null);
+  const blinkAnimations = useRef<Record<string, Animated.Value>>({});
+
+  // Initialize animations for all stages
+  useEffect(() => {
+    ORDER_STAGES.forEach(stage => {
+      if (!blinkAnimations.current[stage.stage]) {
+        blinkAnimations.current[stage.stage] = new Animated.Value(1);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     const fetchOrder = async () => {
@@ -217,7 +230,56 @@ export default function OrderTrackingScreen() {
 
         // Fetch order from backend API
         const orderData = await ordersApi.getById(orderId);
+        
+        // Check if status changed to trigger blinking animation
+        if (previousStatus && orderData.status !== previousStatus) {
+          // Status changed - trigger blink animation for the new status
+          const statusToStageMap: Record<string, string> = {
+            'Preparing': 'Order Ready',
+            'Order Ready': 'Order Ready',
+            'Ready': 'Order Ready',
+            'Picked Up': 'Out for Delivery',
+            'Out for Delivery': 'Out for Delivery',
+            'Delivered': 'Delivered',
+          };
+          const effectiveStatus = statusToStageMap[orderData.status] || orderData.status;
+          
+          // Initialize animation for this stage if not exists
+          if (!blinkAnimations.current[effectiveStatus]) {
+            blinkAnimations.current[effectiveStatus] = new Animated.Value(1);
+          }
+          
+          // Start blinking animation
+          Animated.loop(
+            Animated.sequence([
+              Animated.timing(blinkAnimations.current[effectiveStatus], {
+                toValue: 0.3,
+                duration: 500,
+                useNativeDriver: true,
+              }),
+              Animated.timing(blinkAnimations.current[effectiveStatus], {
+                toValue: 1,
+                duration: 500,
+                useNativeDriver: true,
+              }),
+            ])
+          ).start();
+          
+          // Stop blinking after 3 seconds
+          setTimeout(() => {
+            if (blinkAnimations.current[effectiveStatus]) {
+              blinkAnimations.current[effectiveStatus].stopAnimation();
+              Animated.timing(blinkAnimations.current[effectiveStatus], {
+                toValue: 1,
+                duration: 300,
+                useNativeDriver: true,
+              }).start();
+            }
+          }, 3000);
+        }
+        
         setOrder(orderData);
+        setPreviousStatus(orderData.status);
       } catch (error) {
         console.error('Error fetching order:', error);
         Alert.alert('Error', 'Failed to load order tracking', [
@@ -229,7 +291,12 @@ export default function OrderTrackingScreen() {
     };
 
     fetchOrder();
-  }, [orderId, user, router]);
+    
+    // Poll for order updates every 5 seconds
+    const pollInterval = setInterval(fetchOrder, 5000);
+    
+    return () => clearInterval(pollInterval);
+  }, [orderId, user, router, previousStatus]);
 
   if (isLoading) {
     return (
@@ -355,19 +422,23 @@ export default function OrderTrackingScreen() {
           <View style={styles.timeline}>
             {getOrderStages(order.status, order.timeline).map((stage, index, arr) => {
               const isLast = index === arr.length - 1;
-              // Use timeline data if available, otherwise use stage.isCompleted
-              const isCompleted = stage.isCompleted !== undefined 
-                ? stage.isCompleted 
-                : isStageCompleted(stage.stage, order.status, order.timeline);
-              const isCurrent = isCurrentStage(stage.stage, order.status);
+              const isCompleted = stage.isCompleted || false;
+              const isCurrent = stage.isCurrent || false;
+              const isInactive = stage.isInactive || false;
+              
+              // Get blinking animation for current stage
+              const animationValue = blinkAnimations.current[stage.stage];
+              const shouldBlink = isCurrent && animationValue;
               
               return (
                 <View key={stage.stage} style={styles.timelineRow}>
                   <View style={styles.timelineIndicator}>
-                    <View style={[
+                    <Animated.View style={[
                       styles.timelineIconContainer,
                       isCompleted && styles.timelineIconContainerCompleted,
                       isCurrent && styles.timelineIconContainerCurrent,
+                      isInactive && styles.timelineIconContainerInactive,
+                      shouldBlink && animationValue ? { opacity: animationValue } : {},
                     ]}>
                       {isCompleted ? (
                         <CheckCircle size={24} color="#FFFFFF" strokeWidth={2.5} fill="#059669" />
@@ -376,14 +447,15 @@ export default function OrderTrackingScreen() {
                           {stage.icon}
                         </View>
                       ) : (
-                        <Circle size={24} color="#D1D5DB" strokeWidth={2} />
+                        <Circle size={24} color={isInactive ? "#D1D5DB" : "#9CA3AF"} strokeWidth={2} />
                       )}
-                    </View>
+                    </Animated.View>
                     {!isLast && (
                       <View
                         style={[
                           styles.timelineConnector,
                           isCompleted && styles.timelineConnectorActive,
+                          isInactive && styles.timelineConnectorInactive,
                         ]}
                       />
                     )}
@@ -395,6 +467,7 @@ export default function OrderTrackingScreen() {
                           styles.timelineStage,
                           isCompleted && styles.timelineStageCompleted,
                           isCurrent && styles.timelineStageCurrent,
+                          isInactive && styles.timelineStageInactive,
                         ]}
                       >
                         {stage.stage}
@@ -408,6 +481,7 @@ export default function OrderTrackingScreen() {
                     <Text style={[
                       styles.timelineDescription,
                       isCurrent && styles.timelineDescriptionCurrent,
+                      isInactive && styles.timelineDescriptionInactive,
                     ]}>
                       {stage.description}
                     </Text>
@@ -645,6 +719,9 @@ const styles = StyleSheet.create({
   timelineIconContainerCurrent: {
     backgroundColor: '#1D4ED8',
   },
+  timelineIconContainerInactive: {
+    backgroundColor: '#F3F4F6',
+  },
   currentStageIndicator: {
     width: 32,
     height: 32,
@@ -662,6 +739,9 @@ const styles = StyleSheet.create({
   },
   timelineConnectorActive: {
     backgroundColor: '#059669',
+  },
+  timelineConnectorInactive: {
+    backgroundColor: '#E5E7EB',
   },
   timelineContent: {
     flex: 1,
@@ -685,6 +765,9 @@ const styles = StyleSheet.create({
     color: '#1D4ED8',
     fontSize: 16,
   },
+  timelineStageInactive: {
+    color: '#9CA3AF',
+  },
   currentBadge: {
     backgroundColor: '#DBEAFE',
     paddingHorizontal: 8,
@@ -705,6 +788,9 @@ const styles = StyleSheet.create({
   timelineDescriptionCurrent: {
     color: '#1F2937',
     fontWeight: '500',
+  },
+  timelineDescriptionInactive: {
+    color: '#9CA3AF',
   },
   timelineTimestamp: {
     fontSize: 12,

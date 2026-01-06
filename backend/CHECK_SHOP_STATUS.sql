@@ -35,3 +35,4 @@ ORDER BY created_at DESC;
 -- FROM shops
 -- WHERE id = 'your-shop-id-here';
 
+

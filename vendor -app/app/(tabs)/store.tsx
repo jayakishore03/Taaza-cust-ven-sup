@@ -13,10 +13,15 @@ import {
   Platform,
   ActivityIndicator,
   Image,
+  Modal,
 } from 'react-native';
+import { Search, X } from 'lucide-react-native';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { 
-  getAllProducts, 
+  getAllProducts,
+  getShopProducts,
   getVendorShopId, 
   syncProductToShop,
   type Product 
@@ -39,169 +44,126 @@ interface ProductState {
   discount_percentage?: number;
 }
 
-// Memoized Product Card Component to prevent re-renders and keyboard dismissal
+// Helper function to calculate pricing details (similar to customer app)
+const getProductPricingDetails = (product: ProductState, pricePerKgOverride?: number) => {
+  // Use override price if provided, otherwise use product's price_per_kg
+  const pricePerKg = pricePerKgOverride !== undefined ? pricePerKgOverride : (product.price_per_kg || 0);
+  
+  // Calculate price based on weight and price per kg (like customer app)
+  const weightInKg = product.weight_in_kg || 1.0;
+  const calculatedPrice = pricePerKg * weightInKg;
+  
+  // Use stored price if available and valid, otherwise use calculated price
+  const currentPrice = (product.price && product.price > 0) ? product.price : calculatedPrice;
+  
+  const discountPercentage = product.discount_percentage || 0;
+  
+  // Calculate original price
+  let originalPrice = currentPrice;
+  if (product.original_price && product.original_price > currentPrice) {
+    originalPrice = product.original_price;
+  } else if (discountPercentage > 0 && currentPrice > 0) {
+    originalPrice = currentPrice / (1 - discountPercentage / 100);
+  }
+
+  return {
+    currentPrice,
+    originalPrice: Math.round(originalPrice),
+    discountPercentage: Math.round(discountPercentage),
+  };
+};
+
+// Product Card Component - Grid View (similar to customer app)
 const ProductCard = memo(({ 
   product, 
-  initialPrice, 
-  onPriceChange, 
-  onToggleAvailability 
+  pricePerKg,
+  onEdit 
 }: {
   product: ProductState;
-  initialPrice: string;
-  onPriceChange: (productId: string, text: string) => void;
-  onToggleAvailability: (productId: string) => void;
+  pricePerKg: number;
+  onEdit: (product: ProductState) => void;
 }) => {
-  // Use local state for the input value to prevent re-renders from parent
-  const [localPrice, setLocalPrice] = useState(initialPrice);
-  const [isFocused, setIsFocused] = useState(false);
-  const inputRef = useRef<any>(null);
-
-  // Update local state when initialPrice changes from outside (but not while focused)
-  useEffect(() => {
-    if (!isFocused && initialPrice !== localPrice) {
-      setLocalPrice(initialPrice);
-    }
-  }, [initialPrice]);
-
-  const handlePriceChange = (text: string) => {
-    // Remove leading zeros and allow empty string or numeric only
-    let cleanedValue = text;
-    
-    // Remove leading zeros (but keep single zero or decimal point)
-    if (cleanedValue.length > 1 && cleanedValue.startsWith('0') && !cleanedValue.startsWith('0.')) {
-      cleanedValue = cleanedValue.replace(/^0+/, '') || '0';
-    }
-    
-    // Allow empty string or numeric only (including decimals)
-    if (cleanedValue === '' || /^\d*\.?\d*$/.test(cleanedValue)) {
-      setLocalPrice(cleanedValue);
-      // Debounce the parent update to prevent re-renders
-      onPriceChange(product.id, cleanedValue);
-    }
-  };
-
-  const handleFocus = () => {
-    setIsFocused(true);
-    // Ensure keyboard stays open
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
-  };
-
-  const handleBlur = () => {
-    setIsFocused(false);
-  };
+  // Use the actual price_per_kg (from prices state or product)
+  const actualPricePerKg = pricePerKg > 0 ? pricePerKg : (product.price_per_kg || 0);
+  
+  // Calculate pricing details with the actual price per kg
+  const { currentPrice, originalPrice, discountPercentage } = getProductPricingDetails(product, actualPricePerKg);
+  const displayWeight = product.weight?.trim()
+    ? product.weight
+    : product.weight_in_kg && product.weight_in_kg >= 1
+      ? `${product.weight_in_kg} kg`
+      : product.weight_in_kg
+        ? `${Math.round(product.weight_in_kg * 1000)} g`
+        : '1 kg';
 
   return (
-    <View style={styles.productCard}>
-      {/* Product Image */}
-      <Image
-        source={getImageSource(product.image_url, product.name, product.category)}
+    <TouchableOpacity
+      style={styles.productCard}
+      onPress={() => onEdit(product)}
+    >
+      <Image 
+        source={getImageSource(product.image_url, product.name, product.category)} 
         style={styles.productImage}
-        resizeMode="cover"
         defaultSource={require('../../assets/images/taaza.png')}
         onError={() => {
           if (__DEV__) {
             console.warn('[StoreScreen] Image failed to load:', product.name, product.image_url);
           }
         }}
+        resizeMode="cover"
       />
-      
-      {/* Product Info Section */}
-      <View style={styles.productContent}>
-        {/* Product Name and Availability Badge */}
-        <View style={styles.productHeader}>
-          <Text style={styles.productName}>{product.name}</Text>
-          {product.is_available && (
-            <View style={styles.availableBadgeContainer}>
-              <Text style={styles.availableBadge}>Available</Text>
-            </View>
+      {!product.is_available && (
+        <View style={styles.unavailableBadge}>
+          <Text style={styles.unavailableBadgeText}>Unavailable</Text>
+        </View>
+      )}
+      <View style={styles.productInfo}>
+        <Text style={styles.productName}>{product.name || ''}</Text>
+        <Text style={styles.productWeight}>{displayWeight}</Text>
+        <View style={styles.productPricingWrapper}>
+          {actualPricePerKg > 0 ? (
+            <>
+              <Text style={styles.productCurrentPrice}>
+                ₹{Math.round(currentPrice)}
+              </Text>
+              {originalPrice > currentPrice && (
+                <Text style={styles.productOriginalPrice}>
+                  ₹{Math.round(originalPrice)}
+                </Text>
+              )}
+              {discountPercentage > 0 && originalPrice > currentPrice && (
+                <Text style={styles.productDiscount}>
+                  {discountPercentage}% off
+                </Text>
+              )}
+            </>
+          ) : (
+            <Text style={styles.productNoPrice}>Set price</Text>
           )}
         </View>
-
-        {/* Product Details - Weight, Description */}
-        {(product.weight || product.description) && (
-          <View style={styles.productDetailsSection}>
-            {product.weight && (
-              <Text style={styles.productDetailText}>
-                📦 Weight: {product.weight}
-              </Text>
-            )}
-            {product.description && (
-              <Text style={styles.productDetailText} numberOfLines={2}>
-                📝 {product.description}
-              </Text>
-            )}
-            {product.price && product.price > 0 && (
-              <Text style={styles.productDetailText}>
-                💰 Current Price: ₹{product.price.toFixed(2)}
-              </Text>
-            )}
-            {product.original_price && product.original_price > product.price! && (
-              <View style={styles.discountInfo}>
-                <Text style={styles.originalPriceText}>
-                  ₹{product.original_price.toFixed(2)}
-                </Text>
-                {product.discount_percentage > 0 && (
-                  <Text style={styles.discountText}>
-                    {product.discount_percentage}% OFF
-                  </Text>
-                )}
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Price Input */}
-        <View style={styles.priceSection}>
-          <Text style={styles.priceLabel}>Price per kg:</Text>
-          <View style={[styles.rateInputContainer, isFocused && styles.rateInputFocused]}>
-            <Text style={styles.currencySymbol}>₹</Text>
-            <TextInput
-              ref={inputRef}
-              style={styles.rateInput}
-              keyboardType="decimal-pad"
-              value={localPrice}
-              onChangeText={handlePriceChange}
-              placeholder="Enter price"
-              maxLength={10}
-              onFocus={handleFocus}
-              onBlur={handleBlur}
-              selectionColor="#111"
-              returnKeyType="done"
-              blurOnSubmit={false}
-              editable={true}
-              importantForAutofill="no"
-              autoCorrect={false}
-              autoCapitalize="none"
-              keyboardAppearance="default"
-              showSoftInputOnFocus={true}
-            />
-          </View>
+        <View style={styles.productFooter}>
+          {actualPricePerKg > 0 ? (
+            <Text style={styles.productPricePerKg}>
+              ₹{actualPricePerKg.toFixed(2)}/kg
+            </Text>
+          ) : (
+            <Text style={styles.productPricePerKg}>Price not set</Text>
+          )}
         </View>
-
-        {/* Availability Toggle */}
-        <View style={styles.availabilitySection}>
-          <Text style={styles.availabilityLabel}>
-            {product.is_available ? 'Available' : 'Not Available'}
-          </Text>
-          <Switch
-            value={product.is_available}
-            onValueChange={() => onToggleAvailability(product.id)}
-            thumbColor={product.is_available ? '#111111' : '#f4f3f4'}
-            trackColor={{ false: '#767577', true: '#4CAF50' }}
-          />
-        </View>
+        <TouchableOpacity 
+          style={styles.editButton}
+          onPress={() => onEdit(product)}
+        >
+          <Text style={styles.editButtonText}>EDIT</Text>
+        </TouchableOpacity>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }, (prevProps, nextProps) => {
-  // Only re-render if product availability changes or initial price changes (but not while typing)
-  // This prevents re-renders when user is typing
   return (
     prevProps.product.id === nextProps.product.id &&
     prevProps.product.is_available === nextProps.product.is_available &&
-    prevProps.initialPrice === nextProps.initialPrice
+    prevProps.pricePerKg === nextProps.pricePerKg
   );
 });
 
@@ -214,6 +176,12 @@ export default function StoreScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [shopId, setShopId] = useState<string | null>(null);
+  const [shopType, setShopType] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [editingProduct, setEditingProduct] = useState<ProductState | null>(null);
+  const [editPrice, setEditPrice] = useState('');
+  const [editAvailable, setEditAvailable] = useState(true);
   const inputRefs = useRef<Record<string, any>>({});
 
   // Load products from Supabase on mount
@@ -221,48 +189,117 @@ export default function StoreScreen() {
     loadProducts();
   }, []);
 
+  // Reload products when screen comes into focus (to get latest updates)
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[StoreScreen] Screen focused - reloading products to get latest updates...');
+      loadProducts();
+    }, [])
+  );
+
+  // Helper function to map shop_type to product category
+  const getCategoryFromShopType = (shopType: string | null): string | null => {
+    if (!shopType) return null;
+    
+    const shopTypeMap: Record<string, string> = {
+      'chicken': 'Chicken',
+      'mutton': 'Mutton',
+      'pork': 'Pork',
+      'meat': 'Meat',
+    };
+    
+    return shopTypeMap[shopType.toLowerCase()] || null;
+  };
+
   const loadProducts = async () => {
     try {
       setLoading(true);
       
-      // Get vendor's shop ID
+      // Get vendor's shop ID and shop type
       const vendorShopId = await getVendorShopId();
       setShopId(vendorShopId);
 
-      // Get all products from Supabase
-      const allProducts = await getAllProducts();
-      
-      if (allProducts && allProducts.length > 0) {
-        // Map products to our state
-        // Load all products from customer app's Supabase (base catalog)
-        // Prices will be set by vendor, starting from empty
-        const productStates: ProductState[] = allProducts.map((product) => ({
-          id: product.id,
-          name: product.name,
-          category: product.category,
-          // Always start as available (ON) by default
-          // If product already has shop_id matching vendor, use its existing status
-          // Otherwise, default to available (true)
-          is_available: product.shop_id === vendorShopId ? (product.is_available !== undefined ? product.is_available : true) : true,
-          // Use existing price if product belongs to this vendor's shop, otherwise start with 0
-          price_per_kg: product.shop_id === vendorShopId ? (product.price_per_kg || 0) : 0,
-          image_url: product.image_url,
-          weight: product.weight || null,
-          weight_in_kg: product.weight_in_kg || 1,
-          description: product.description || '',
-          price: product.price || 0,
-          original_price: product.original_price || null,
-          discount_percentage: product.discount_percentage || 0,
-        }));
+      // Get shop type from vendor data FIRST (before loading products)
+      let shopTypeFromData: string | null = null;
+      try {
+        const vendorDataStr = await AsyncStorage.getItem('vendor_data');
+        if (vendorDataStr) {
+          const vendorData = JSON.parse(vendorDataStr);
+          shopTypeFromData = vendorData?.shop?.shop_type || vendorData?.shop?.shopType || null;
+          setShopType(shopTypeFromData);
+          console.log('[StoreScreen] Shop type loaded:', shopTypeFromData);
+        }
+      } catch (error) {
+        console.warn('[StoreScreen] Error loading shop type:', error);
+      }
 
-        // Initialize prices - start with empty/0 for all products
-        // Vendors will set their own prices
+      // Get base products (shop_id IS NULL) - these are templates
+      const baseProducts = await getAllProducts();
+      
+      // Get shop-specific products (shop_id = vendorShopId) - vendor's custom prices/availability
+      let shopProducts: Product[] = [];
+      if (vendorShopId) {
+        shopProducts = await getShopProducts(vendorShopId);
+      }
+      
+      // Create a map of shop-specific products by name for quick lookup
+      const shopProductsMap = new Map<string, Product>();
+      shopProducts.forEach((sp) => {
+        shopProductsMap.set(sp.name, sp);
+      });
+
+      if (baseProducts && baseProducts.length > 0) {
+        // Filter base products based on shop type (use shopTypeFromData, not state)
+        let filteredProducts = baseProducts;
+        
+        if (shopTypeFromData && shopTypeFromData.toLowerCase() !== 'multi') {
+          const targetCategory = getCategoryFromShopType(shopTypeFromData);
+          if (targetCategory) {
+            filteredProducts = baseProducts.filter(
+              (product) => product.category?.toLowerCase() === targetCategory.toLowerCase()
+            );
+            console.log(`[StoreScreen] Filtered products by shop type "${shopTypeFromData}" (category: "${targetCategory}"): ${filteredProducts.length} products`);
+          } else {
+            console.log(`[StoreScreen] Unknown shop type "${shopTypeFromData}", showing all products`);
+          }
+        } else {
+          console.log('[StoreScreen] Shop type is "multi" or not set, showing all products');
+        }
+
+        // Map base products to our state, merging with shop-specific data if available
+        // Vendor app shows base products (templates) but with shop-specific prices/availability if set
+        const productStates: ProductState[] = filteredProducts.map((baseProduct) => {
+          // Check if this shop has a custom version of this product
+          const shopProduct = shopProductsMap.get(baseProduct.name);
+          
+          // Use shop-specific price/availability if exists, otherwise use base product defaults
+          const pricePerKg = shopProduct?.price_per_kg || baseProduct.price_per_kg || 0;
+          const isAvailable = shopProduct?.is_available !== undefined ? shopProduct.is_available : false;
+          
+          return {
+            id: baseProduct.id, // Use base product ID (vendor will sync using this ID)
+            name: baseProduct.name,
+            category: baseProduct.category,
+            is_available: isAvailable,
+            price_per_kg: pricePerKg,
+            image_url: baseProduct.image_url,
+            weight: baseProduct.weight || null,
+            weight_in_kg: baseProduct.weight_in_kg || 1,
+            description: baseProduct.description || '',
+            // Calculate price based on weight and price_per_kg
+            price: pricePerKg * (baseProduct.weight_in_kg || 1),
+            original_price: baseProduct.original_price || null,
+            discount_percentage: baseProduct.discount_percentage || 0,
+          };
+        });
+
+        // Initialize prices - use default prices from Supabase, vendor can override
         const initialPrices: Record<string, string> = {};
         productStates.forEach((product) => {
-          // Use existing price if product already has a price set
+          // Always use the price_per_kg (default or vendor's custom price)
           let priceValue = '';
           if (product.price_per_kg && product.price_per_kg > 0) {
-            // Use existing price
+            // Format price: remove trailing zeros but keep decimals if needed
             priceValue = product.price_per_kg.toString().replace(/\.?0+$/, '');
             if (priceValue.includes('.') && priceValue.endsWith('.')) {
               priceValue = priceValue.slice(0, -1);
@@ -402,6 +439,73 @@ export default function StoreScreen() {
     }
   };
 
+  // Handle product edit
+  const handleEditProduct = (product: ProductState) => {
+    setEditingProduct(product);
+    setEditPrice(prices[product.id] || (product.price_per_kg > 0 ? product.price_per_kg.toString() : ''));
+    setEditAvailable(product.is_available);
+  };
+
+  // Save edited product
+  const handleSaveEdit = async () => {
+    if (!editingProduct) return;
+
+    const priceValue = parseFloat(editPrice);
+    if (isNaN(priceValue) || priceValue < 0) {
+      Alert.alert('Error', 'Please enter a valid price');
+      return;
+    }
+
+    // Save to backend first
+    try {
+      if (shopId) {
+        const result = await syncProductToShop(shopId, editingProduct.id, editAvailable, priceValue);
+        if (result.success) {
+          // Immediately reload products from Supabase to get latest updates
+          console.log('[StoreScreen] Product saved successfully, reloading products...');
+          await loadProducts();
+          
+          Alert.alert('Success', 'Product updated successfully!');
+        } else {
+          Alert.alert('Error', result.error || 'Failed to save product');
+        }
+      }
+    } catch (error: any) {
+      console.error('Error saving product:', error);
+      Alert.alert('Error', error.message || 'Failed to save product');
+    }
+
+    setEditingProduct(null);
+  };
+
+  // Get unique categories
+  const categories = useMemo(() => {
+    const cats = ['All', ...Array.from(new Set(products.map(p => p.category)))];
+    return cats;
+  }, [products]);
+
+  // Filter products by category and search query
+  const filteredProducts = useMemo(() => {
+    let filtered = products;
+
+    // Filter by category
+    if (selectedCategory !== 'All') {
+      filtered = filtered.filter(p => p.category === selectedCategory);
+    }
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(p => 
+        p.name?.toLowerCase().includes(query) ||
+        p.category?.toLowerCase().includes(query) ||
+        p.description?.toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
+  }, [products, selectedCategory, searchQuery]);
+
   // Group products by category - memoized to prevent unnecessary re-renders
   const productsByCategory = useMemo(() => {
     return products.reduce((acc, product) => {
@@ -457,36 +561,149 @@ export default function StoreScreen() {
               </View>
             ) : (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Manage Products & Prices</Text>
+                <Text style={styles.sectionTitle}>Products</Text>
+                {shopType && (
+                  <Text style={styles.shopTypeInfo}>
+                    Shop Type: {shopType.charAt(0).toUpperCase() + shopType.slice(1)}
+                    {shopType.toLowerCase() !== 'multi' && ' - Showing matching products only'}
+                  </Text>
+                )}
                 <Text style={styles.sectionSubtitle}>
-                  Set your prices per kg for each product. Toggle ON to make products available. 
-                  Changes will be saved to Supabase and immediately reflect in the customer app.
+                  Tap on a product to set price and availability
                 </Text>
 
-                {Object.entries(productsByCategory).map(([category, categoryProducts]) => (
-                  <View key={category} style={styles.categorySection}>
-                    <Text style={styles.categoryTitle}>{category}</Text>
-                    {categoryProducts.map((product) => {
-                      return (
-                        <ProductCard
-                          key={product.id}
-                          product={product}
-                          initialPrice={prices[product.id] || ''}
-                          onPriceChange={updatePrice}
-                          onToggleAvailability={toggleProductAvailability}
-                        />
-                      );
-                    })}
+                {/* Search Bar */}
+                <View style={styles.searchContainer}>
+                  <View style={styles.searchInputWrapper}>
+                    <Search size={20} color="#6B7280" style={styles.searchIcon} />
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Search products..."
+                      placeholderTextColor="#9CA3AF"
+                      value={searchQuery}
+                      onChangeText={setSearchQuery}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    {searchQuery.length > 0 && (
+                      <TouchableOpacity
+                        onPress={() => setSearchQuery('')}
+                        style={styles.clearSearchButton}
+                      >
+                        <X size={18} color="#6B7280" />
+                      </TouchableOpacity>
+                    )}
                   </View>
-                ))}
+                </View>
 
-                <Text style={styles.infoText}>
-                  💡 Set your prices per kilogram for each product. Prices are saved to Supabase and 
-                  will immediately appear in the customer app when they select your shop. 
-                  Products must have a price greater than 0 to be available.
-                </Text>
+                {/* Category Filter */}
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.categoryScroll}
+                  contentContainerStyle={styles.categoryContainer}
+                >
+                  {categories.map((category) => (
+                    <TouchableOpacity
+                      key={category}
+                      style={[
+                        styles.categoryChip,
+                        selectedCategory === category && styles.categoryChipActive
+                      ]}
+                      onPress={() => setSelectedCategory(category)}
+                    >
+                      <Text style={[
+                        styles.categoryText,
+                        selectedCategory === category && styles.categoryTextActive
+                      ]}>
+                        {category}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                {/* Products Grid */}
+                <View style={styles.productsGrid}>
+                  {filteredProducts.map((product) => {
+                    // Get price from prices state or product
+                    const priceString = prices[product.id] || '';
+                    const pricePerKg = priceString ? parseFloat(priceString) : (product.price_per_kg || 0);
+                    
+                    return (
+                      <ProductCard
+                        key={product.id}
+                        product={product}
+                        pricePerKg={pricePerKg}
+                        onEdit={handleEditProduct}
+                      />
+                    );
+                  })}
+                </View>
+
+                {filteredProducts.length === 0 && (
+                  <View style={styles.emptyProductsContainer}>
+                    <Text style={styles.emptyProductsText}>No products in this category</Text>
+                  </View>
+                )}
               </View>
             )}
+
+        {/* Edit Product Modal */}
+        <Modal
+          visible={editingProduct !== null}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setEditingProduct(null)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  {editingProduct?.name || 'Edit Product'}
+                </Text>
+                <TouchableOpacity onPress={() => setEditingProduct(null)}>
+                  <Text style={styles.modalClose}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.modalBody}>
+                <View style={styles.modalInputGroup}>
+                  <Text style={styles.modalLabel}>Price per kg (₹)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    keyboardType="decimal-pad"
+                    value={editPrice}
+                    onChangeText={setEditPrice}
+                    placeholder="Enter price per kg"
+                    autoFocus
+                  />
+                </View>
+
+                <View style={styles.modalSwitchGroup}>
+                  <Text style={styles.modalLabel}>Availability</Text>
+                  <View style={styles.modalSwitchRow}>
+                    <Text style={styles.modalSwitchLabel}>
+                      {editAvailable ? 'Available' : 'Not Available'}
+                    </Text>
+                    <Switch
+                      value={editAvailable}
+                      onValueChange={setEditAvailable}
+                      thumbColor={editAvailable ? '#111111' : '#f4f3f4'}
+                      trackColor={{ false: '#767577', true: '#4CAF50' }}
+                    />
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.modalSaveButton}
+                  onPress={handleSaveEdit}
+                >
+                  <Text style={styles.modalSaveButtonText}>Save Changes</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
           </ScrollView>
         )}
       </KeyboardAvoidingView>
@@ -654,67 +871,235 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
   },
-  categorySection: {
-    marginBottom: 24,
+  categoryScroll: {
+    marginTop: 10,
+    marginBottom: 20,
   },
-  categoryTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#374151',
-    marginBottom: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+  categoryContainer: {
+    paddingVertical: 8,
+    paddingBottom: 12,
+    gap: 10,
+  },
+  categoryChip: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    marginRight: 10,
+    minHeight: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  categoryChipActive: {
+    backgroundColor: '#FCD34D',
+  },
+  categoryText: {
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  categoryTextActive: {
+    color: '#1F2937',
+    fontWeight: '600',
+  },
+  productsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 15,
+    marginTop: 10,
   },
   productCard: {
-    flexDirection: 'row',
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    marginBottom: 16,
-    overflow: 'hidden',
-    elevation: 2,
+    width: '47%',
     shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    position: 'relative',
+    flexDirection: 'column',
+    overflow: 'hidden', // Ensure badge doesn't overflow card boundaries
   },
   productImage: {
-    width: 120,
-    height: 120,
-    backgroundColor: '#F3F4F6',
+    width: '100%',
+    height: 130,
     borderTopLeftRadius: 16,
-    borderBottomLeftRadius: 16,
+    borderTopRightRadius: 16,
   },
-  productContent: {
+  productInfo: {
+    padding: 12,
     flex: 1,
-    padding: 16,
     justifyContent: 'space-between',
-  },
-  productHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+    flexDirection: 'column',
+    minHeight: 140,
   },
   productName: {
-    fontSize: 18,
-    color: '#111111',
+    fontSize: 14,
     fontWeight: '600',
-    flex: 1,
+    color: '#1F2937',
+    minHeight: 36,
+    marginBottom: 4,
   },
-  availableBadgeContainer: {
-    marginLeft: 8,
-  },
-  availableBadge: {
+  productWeight: {
     fontSize: 11,
-    color: '#4CAF50',
+    color: '#9CA3AF',
+    marginBottom: 8,
+  },
+  productPricingWrapper: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    marginBottom: 6,
+    flexWrap: 'wrap',
+  },
+  productCurrentPrice: {
+    fontSize: 16,
     fontWeight: '700',
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 10,
+    color: '#1F2937',
+  },
+  productOriginalPrice: {
+    fontSize: 13,
+    color: '#9CA3AF',
+    textDecorationLine: 'line-through',
+  },
+  productDiscount: {
+    fontSize: 13,
+    color: '#059669',
+    fontWeight: '600',
+  },
+  productNoPrice: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    fontStyle: 'italic',
+  },
+  productFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  productPricePerKg: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  editButton: {
+    backgroundColor: '#DC2626',
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 'auto',
+  },
+  editButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  unavailableBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(156, 163, 175, 0.9)',
+    paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
-    overflow: 'hidden',
+    borderRadius: 12,
+  },
+  unavailableBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  emptyProductsContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptyProductsText: {
+    fontSize: 14,
+    color: '#9CA3AF',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '80%',
+    paddingBottom: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#111111',
+  },
+  modalClose: {
+    fontSize: 24,
+    color: '#6B7280',
+  },
+  modalBody: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  modalInputGroup: {
+    marginBottom: 20,
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  modalInput: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#111111',
+  },
+  modalSwitchGroup: {
+    marginBottom: 20,
+  },
+  modalSwitchRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalSwitchLabel: {
+    fontSize: 16,
+    color: '#111111',
+    fontWeight: '500',
+  },
+  modalSaveButton: {
+    backgroundColor: '#111111',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  modalSaveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   priceSection: {
     flexDirection: 'row',
@@ -732,6 +1117,44 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginBottom: 20,
     fontStyle: 'italic',
+  },
+  searchContainer: {
+    marginBottom: 20,
+  },
+  searchInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  searchIcon: {
+    marginRight: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#111111',
+    padding: 0,
+    margin: 0,
+  },
+  clearSearchButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  shopTypeInfo: {
+    fontSize: 13,
+    color: '#059669',
+    fontWeight: '600',
+    marginBottom: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#D1FAE5',
+    borderRadius: 8,
+    alignSelf: 'flex-start',
   },
   availabilitySection: {
     flexDirection: 'row',

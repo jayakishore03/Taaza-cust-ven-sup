@@ -46,7 +46,7 @@ export interface OrderItem {
   price: number;
 }
 
-export type OrderStatus = 'Delivered' | 'Out for Delivery' | 'Preparing' | 'Cancelled';
+export type OrderStatus = 'Delivered' | 'Out for Delivery' | 'Preparing' | 'Cancelled' | 'Order Ready' | 'Order Placed' | 'Picked Up';
 
 export interface OrderTimelineEvent {
   stage: string;

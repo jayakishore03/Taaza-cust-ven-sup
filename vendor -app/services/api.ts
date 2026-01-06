@@ -696,6 +696,7 @@ export const getShopById = async (shopId: string): Promise<Shop | null> => {
 export interface DashboardStats {
   totalOrders: number;
   pendingOrders: number;
+  totalIncome: number;
 }
 
 // Get dashboard statistics (requires authentication)
@@ -1023,5 +1024,106 @@ export const updateShopStatus = async (isOpen: boolean): Promise<{ success: bool
       success: false,
       error: { message: error.message || 'Failed to update shop status' },
     };
+  }
+};
+
+// ==================== NOTIFICATIONS ====================
+
+export interface Notification {
+  id: string;
+  shop_id: string | null;
+  user_id: string | null;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'success' | 'error';
+  is_read: boolean;
+  created_at: string;
+  read_at: string | null;
+  created_by: string;
+}
+
+/**
+ * Get all notifications for the logged-in vendor
+ */
+export const getVendorNotifications = async (): Promise<Notification[]> => {
+  try {
+    const token = await AsyncStorage.getItem('auth_token');
+    if (!token) {
+      console.warn('[getVendorNotifications] No auth token found');
+      return [];
+    }
+
+    const url = `${API_BASE_URL}/vendor/notifications`;
+    console.log(`[getVendorNotifications] Fetching notifications from: ${url}`);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error(`[getVendorNotifications] Error: ${response.status}`);
+      return [];
+    }
+
+    const result = await response.json();
+    if (result.success && result.data) {
+      return result.data;
+    }
+    return [];
+  } catch (error: any) {
+    console.error('[getVendorNotifications] Exception:', error);
+    return [];
+  }
+};
+
+/**
+ * Mark a notification as read
+ */
+export const markNotificationAsRead = async (notificationId: string): Promise<boolean> => {
+  try {
+    const token = await AsyncStorage.getItem('auth_token');
+    if (!token) {
+      console.warn('[markNotificationAsRead] No auth token found');
+      return false;
+    }
+
+    const url = `${API_BASE_URL}/vendor/notifications/${notificationId}/read`;
+    console.log(`[markNotificationAsRead] Marking notification ${notificationId} as read`);
+
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error(`[markNotificationAsRead] Error: ${response.status}`);
+      return false;
+    }
+
+    const result = await response.json();
+    return result.success || false;
+  } catch (error: any) {
+    console.error('[markNotificationAsRead] Exception:', error);
+    return false;
+  }
+};
+
+/**
+ * Get unread notification count
+ */
+export const getUnreadNotificationCount = async (): Promise<number> => {
+  try {
+    const notifications = await getVendorNotifications();
+    return notifications.filter(n => !n.is_read).length;
+  } catch (error: any) {
+    console.error('[getUnreadNotificationCount] Exception:', error);
+    return 0;
   }
 };

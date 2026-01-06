@@ -40,3 +40,4 @@ FROM shops;
 
 SELECT '✅ Shop is_open column setup complete!' as status;
 
+

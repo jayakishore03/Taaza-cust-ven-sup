@@ -6,30 +6,49 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Environment variables are automatically injected by Vercel
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Trim whitespace and validate URLs
+const supabaseUrl = process.env.SUPABASE_URL?.trim();
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY?.trim();
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
 let supabase;
 let supabaseAdmin;
 
-if (!supabaseUrl || !supabaseAnonKey) {
+// Validate URL format
+const isValidUrl = (url) => {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+if (!supabaseUrl || !supabaseAnonKey || !isValidUrl(supabaseUrl)) {
   console.error('========================================');
-  console.error('❌ CRITICAL: Missing Supabase environment variables!');
+  console.error('❌ CRITICAL: Missing or Invalid Supabase environment variables!');
   console.error('========================================');
-  console.error(`SUPABASE_URL: ${supabaseUrl ? '✅ SET' : '❌ MISSING'}`);
+  console.error(`SUPABASE_URL: ${supabaseUrl ? (isValidUrl(supabaseUrl) ? '✅ VALID' : `❌ INVALID: "${supabaseUrl}" (must be a valid HTTP/HTTPS URL)`) : '❌ MISSING'}`);
   console.error(`SUPABASE_ANON_KEY: ${supabaseAnonKey ? '✅ SET' : '❌ MISSING'}`);
   console.error(`SUPABASE_SERVICE_ROLE_KEY: ${supabaseServiceRoleKey ? '✅ SET' : '❌ MISSING'}`);
   console.error('');
+  if (!isValidUrl(supabaseUrl) && supabaseUrl) {
+    console.error('⚠️  SUPABASE_URL is set but invalid!');
+    console.error(`   Current value: "${supabaseUrl}"`);
+    console.error('   Expected format: https://your-project.supabase.co');
+    console.error('');
+  }
   console.error('⚠️  API will return "Invalid API key" errors for all database operations');
   console.error('');
   console.error('🔧 TO FIX:');
   console.error('   1. Go to Vercel Dashboard → Your Project → Settings → Environment Variables');
-  console.error('   2. Add these variables:');
-  console.error('      - SUPABASE_URL');
-  console.error('      - SUPABASE_ANON_KEY');
-  console.error('      - SUPABASE_SERVICE_ROLE_KEY');
-  console.error('   3. Redeploy your project');
+  console.error('   2. Verify/Update these variables:');
+  console.error('      - SUPABASE_URL: https://fcrhcwvpivkadkkbxcom.supabase.co');
+  console.error('      - SUPABASE_ANON_KEY: (your anon key)');
+  console.error('      - SUPABASE_SERVICE_ROLE_KEY: (your service role key)');
+  console.error('   3. Make sure SUPABASE_URL starts with https:// and has no extra spaces');
+  console.error('   4. Redeploy your project');
   console.error('');
   console.error('📖 See VERCEL_ENV_SETUP_GUIDE.md for detailed instructions');
   console.error('========================================');
@@ -62,16 +81,26 @@ if (!supabaseUrl || !supabaseAnonKey) {
 } else {
   // Create Supabase client for regular operations (uses anon key, respects RLS)
   try {
+    // Double-check URL is valid before creating client
+    if (!isValidUrl(supabaseUrl)) {
+      throw new Error(`Invalid SUPABASE_URL: "${supabaseUrl}" - Must be a valid HTTP or HTTPS URL`);
+    }
     supabase = createClient(supabaseUrl, supabaseAnonKey);
     console.log('✅ Supabase client initialized with anon key');
+    console.log(`   URL: ${supabaseUrl.substring(0, 40)}...`);
   } catch (error) {
     console.error('❌ Failed to create Supabase client:', error);
+    console.error('   This usually means SUPABASE_URL is invalid or malformed');
     throw error;
   }
   
   // Create Supabase admin client for admin operations (uses service role key, bypasses RLS)
   if (supabaseServiceRoleKey) {
     try {
+      // Double-check URL is valid before creating admin client
+      if (!isValidUrl(supabaseUrl)) {
+        throw new Error(`Invalid SUPABASE_URL: "${supabaseUrl}" - Must be a valid HTTP or HTTPS URL`);
+      }
       supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
       console.log('✅ Supabase admin client initialized with service role key');
     } catch (error) {
