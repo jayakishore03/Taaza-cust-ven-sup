@@ -6,6 +6,9 @@ const router = express.Router();
 // Complete signup (create auth user + profile)
 router.post('/signup', deliveryAgentsController.signupDeliveryAgent);
 
+// Login with phone number
+router.post('/login', deliveryAgentsController.loginDeliveryAgent);
+
 // Register new delivery agent
 router.post('/register', deliveryAgentsController.registerDeliveryAgent);
 

@@ -53,14 +53,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email: string, password: string, isPhone: boolean = false) => {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: isPhone ? `${email}@taaza.delivery` : email, // Convert phone to email format if needed
-        password,
-      });
+      if (isPhone) {
+        // Use backend API for phone login
+        const { deliveryAgentAPI } = await import('../services/api');
+        const result = await deliveryAgentAPI.loginWithPhone(email, password);
+        
+        // Set the session from backend response
+        if (result.data?.session) {
+          await supabase.auth.setSession({
+            access_token: result.data.session.access_token,
+            refresh_token: result.data.session.refresh_token,
+          });
+        }
+        
+        return { error: null, user: result.data.user };
+      } else {
+        // Use Supabase client for email login
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
-      if (error) throw error;
+        if (error) throw error;
 
-      return { error: null, user: data.user };
+        return { error: null, user: data.user };
+      }
     } catch (error: any) {
       console.error('Sign in error:', error);
       return { error: error, user: undefined };

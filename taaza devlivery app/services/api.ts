@@ -3,6 +3,25 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
 
 // Delivery Agent API
 export const deliveryAgentAPI = {
+  // Login with phone number
+  loginWithPhone: async (phone_number: string, password: string) => {
+    const response = await fetch(`${API_URL}/delivery-agents/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ phone_number, password }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || result.details || 'Login failed');
+    }
+
+    return result;
+  },
+
   // Complete signup (creates auth user + profile in one call)
   signup: async (data: {
     email: string;

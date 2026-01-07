@@ -139,6 +139,71 @@ export const signupDeliveryAgent = async (req, res) => {
   }
 };
 
+// Login delivery agent with phone number
+export const loginDeliveryAgent = async (req, res) => {
+  try {
+    const { phone_number, password } = req.body;
+
+    console.log('📱 Delivery agent phone login attempt:', phone_number);
+
+    if (!phone_number || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Phone number and password are required',
+      });
+    }
+
+    // Find delivery agent by phone number
+    const { data: agent, error: agentError } = await supabase
+      .from('delivery_agents')
+      .select('user_id, email, full_name')
+      .eq('phone_number', phone_number)
+      .single();
+
+    if (agentError || !agent) {
+      console.error('❌ Agent not found with phone:', phone_number);
+      return res.status(404).json({
+        success: false,
+        error: 'No account found with this phone number',
+      });
+    }
+
+    console.log('✅ Found agent:', agent.email);
+
+    // Sign in using email (since Supabase uses email for auth)
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: agent.email,
+      password: password,
+    });
+
+    if (authError) {
+      console.error('❌ Login failed:', authError.message);
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid password',
+      });
+    }
+
+    console.log('✅ Login successful');
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        user: authData.user,
+        session: authData.session,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Login error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error.message,
+    });
+  }
+};
+
 // Register new delivery agent
 export const registerDeliveryAgent = async (req, res) => {
   try {
