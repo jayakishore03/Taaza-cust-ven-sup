@@ -142,7 +142,7 @@ export const signupDeliveryAgent = async (req, res) => {
 // Login delivery agent with phone number
 export const loginDeliveryAgent = async (req, res) => {
   try {
-    const { phone_number, password } = req.body;
+    let { phone_number, password } = req.body;
 
     console.log('📱 Delivery agent phone login attempt:', phone_number);
 
@@ -153,15 +153,49 @@ export const loginDeliveryAgent = async (req, res) => {
       });
     }
 
-    // Find delivery agent by phone number
-    const { data: agent, error: agentError } = await supabase
-      .from('delivery_agents')
-      .select('user_id, email, full_name')
-      .eq('phone_number', phone_number)
-      .single();
+    // Normalize phone number - remove spaces, dashes, and ensure consistent format
+    let normalizedPhone = phone_number.replace(/[\s\-]/g, '');
+    
+    // If doesn't start with +, add +91 for Indian numbers
+    if (!normalizedPhone.startsWith('+')) {
+      if (normalizedPhone.length === 10) {
+        normalizedPhone = '+91' + normalizedPhone;
+      } else if (normalizedPhone.startsWith('91') && normalizedPhone.length === 12) {
+        normalizedPhone = '+' + normalizedPhone;
+      } else {
+        normalizedPhone = '+' + normalizedPhone;
+      }
+    }
 
-    if (agentError || !agent) {
-      console.error('❌ Agent not found with phone:', phone_number);
+    console.log('📱 Normalized phone:', normalizedPhone);
+
+    // Try multiple phone formats to find the agent
+    const phoneVariants = [
+      normalizedPhone,                           // +916303407434
+      normalizedPhone.replace('+91', '91'),      // 916303407434
+      normalizedPhone.replace('+', ''),          // 916303407434
+      normalizedPhone.replace(/^\+91/, ''),      // 6303407434
+    ];
+
+    console.log('🔍 Trying phone variants:', phoneVariants);
+
+    let agent = null;
+    for (const phoneVariant of phoneVariants) {
+      const { data, error } = await supabase
+        .from('delivery_agents')
+        .select('user_id, email, full_name, phone_number')
+        .eq('phone_number', phoneVariant)
+        .single();
+
+      if (data && !error) {
+        agent = data;
+        console.log('✅ Found agent with phone variant:', phoneVariant);
+        break;
+      }
+    }
+
+    if (!agent) {
+      console.error('❌ Agent not found with any phone variant');
       return res.status(404).json({
         success: false,
         error: 'No account found with this phone number',
