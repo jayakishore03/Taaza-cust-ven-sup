@@ -1404,6 +1404,129 @@ export const updateOrderStatus = async (req, res, next) => {
       statusNote: statusNote || null,
     });
 
+    // ⭐ AUTOMATIC DELIVERY NOTIFICATION - When order is ready, notify delivery agents
+    if (status === 'Order Ready') {
+      try {
+        console.log('📦 Order marked as ready - Finding delivery agents...');
+        
+        // Get full order details with shop and address
+        const { data: fullOrder, error: orderError } = await supabaseAdmin
+          .from('orders')
+          .select(`
+            *,
+            shops:shop_id (
+              id,
+              name,
+              address,
+              latitude,
+              longitude
+            ),
+            addresses:address_id (
+              id,
+              address_line1,
+              address_line2,
+              city,
+              state,
+              pincode,
+              latitude,
+              longitude
+            )
+          `)
+          .eq('id', id)
+          .single();
+
+        if (orderError || !fullOrder) {
+          console.error('❌ Error fetching order details for notification:', orderError);
+        } else if (!fullOrder.shops || !fullOrder.addresses) {
+          console.error('❌ Order missing shop or address data for notification');
+        } else if (!fullOrder.shops.latitude || !fullOrder.shops.longitude || 
+                   !fullOrder.addresses.latitude || !fullOrder.addresses.longitude) {
+          console.error('❌ Shop or customer address missing coordinates for delivery assignment');
+          console.log('   Shop:', { lat: fullOrder.shops.latitude, lng: fullOrder.shops.longitude });
+          console.log('   Customer:', { lat: fullOrder.addresses.latitude, lng: fullOrder.addresses.longitude });
+        } else {
+          // Find nearby delivery agents (within 10km radius)
+          const { data: agents, error: agentsError } = await supabaseAdmin
+            .from('delivery_agents')
+            .select('*')
+            .eq('is_on_duty', true)
+            .eq('is_available', true)
+            .eq('verification_status', 'verified')
+            .not('current_latitude', 'is', null)
+            .not('current_longitude', 'is', null);
+
+          if (agentsError) {
+            console.error('❌ Error finding delivery agents:', agentsError);
+          } else if (!agents || agents.length === 0) {
+            console.warn('⚠️  No available delivery agents found. Order will wait for agent to come online.');
+          } else {
+            // Calculate distances and find nearest agent
+            const shopLat = parseFloat(fullOrder.shops.latitude);
+            const shopLng = parseFloat(fullOrder.shops.longitude);
+            const customerLat = parseFloat(fullOrder.addresses.latitude);
+            const customerLng = parseFloat(fullOrder.addresses.longitude);
+
+            const agentsWithDistance = agents
+              .filter(agent => agent.current_latitude && agent.current_longitude)
+              .map(agent => {
+                const distance = calculateDistance(
+                  shopLat,
+                  shopLng,
+                  parseFloat(agent.current_latitude),
+                  parseFloat(agent.current_longitude)
+                );
+                return { ...agent, distance };
+              })
+              .filter(agent => agent.distance <= 10) // Within 10km
+              .sort((a, b) => a.distance - b.distance);
+
+            if (agentsWithDistance.length === 0) {
+              console.warn('⚠️  No delivery agents found within 10km radius');
+            } else {
+              const nearestAgent = agentsWithDistance[0];
+              console.log(`✅ Found ${agentsWithDistance.length} agents within 10km, nearest: ${nearestAgent.full_name} (${nearestAgent.distance.toFixed(2)}km away)`);
+
+              // Calculate delivery distance (shop to customer)
+              const deliveryDistance = calculateDistance(shopLat, shopLng, customerLat, customerLng);
+
+              // Create notification for nearest agent
+              const { data: notification, error: notifError } = await supabaseAdmin
+                .from('delivery_notifications')
+                .insert({
+                  order_id: id,
+                  agent_user_id: nearestAgent.user_id,
+                  shop_name: fullOrder.shops.name,
+                  shop_address: fullOrder.shops.address,
+                  customer_address: `${fullOrder.addresses.address_line1}, ${fullOrder.addresses.city}`,
+                  shop_latitude: shopLat,
+                  shop_longitude: shopLng,
+                  customer_latitude: customerLat,
+                  customer_longitude: customerLng,
+                  distance_km: deliveryDistance,
+                  status: 'pending',
+                  created_at: now,
+                  expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes
+                })
+                .select()
+                .single();
+
+              if (notifError) {
+                console.error('❌ Error creating delivery notification:', notifError);
+              } else {
+                console.log('✅ Delivery notification created:', notification.id);
+                console.log(`   Agent: ${nearestAgent.full_name}`);
+                console.log(`   Shop: ${fullOrder.shops.name}`);
+                console.log(`   Distance: ${deliveryDistance.toFixed(2)}km`);
+              }
+            }
+          }
+        }
+      } catch (notifError) {
+        console.error('❌ Error in automatic delivery notification:', notifError);
+        // Don't fail the order status update if notification fails
+      }
+    }
+
     res.json({
       success: true,
       data: { message: 'Order status updated successfully' },
@@ -1433,5 +1556,18 @@ function formatDate(dateString) {
 function formatTime(dateString) {
   const date = new Date(dateString);
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+// Calculate distance between two coordinates using Haversine formula
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Distance in km
 }
 
