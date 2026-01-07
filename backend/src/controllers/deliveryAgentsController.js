@@ -171,10 +171,13 @@ export const loginDeliveryAgent = async (req, res) => {
 
     // Try multiple phone formats to find the agent
     const phoneVariants = [
+      phone_number,                              // Original input (try first)
       normalizedPhone,                           // +916303407434
+      normalizedPhone.replace(/^\+91/, '+91-'),  // +91-6303407434 (with dash)
       normalizedPhone.replace('+91', '91'),      // 916303407434
       normalizedPhone.replace('+', ''),          // 916303407434
       normalizedPhone.replace(/^\+91/, ''),      // 6303407434
+      `+91-${normalizedPhone.replace(/^\+91/, '')}`, // +91-6303407434 (ensure dash format)
     ];
 
     console.log('🔍 Trying phone variants:', phoneVariants);
