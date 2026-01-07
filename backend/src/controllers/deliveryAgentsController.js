@@ -29,6 +29,18 @@ export const signupDeliveryAgent = async (req, res) => {
     } = req.body;
 
     console.log('🚀 Starting delivery agent complete signup...');
+    console.log('📧 Email:', email);
+    console.log('👤 Full name:', full_name);
+    console.log('📱 Phone:', phone_number);
+
+    // Check if service role key is available
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error('❌ CRITICAL: SUPABASE_SERVICE_ROLE_KEY not found in environment variables!');
+      return res.status(500).json({
+        success: false,
+        error: 'Server configuration error: Missing service role key',
+      });
+    }
 
     // Validation
     if (!email || !password || !full_name || !phone_number) {
@@ -39,6 +51,7 @@ export const signupDeliveryAgent = async (req, res) => {
     }
 
     // Step 1: Create auth user with auto-confirmation
+    console.log('🔐 Creating auth user with admin API...');
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password,
@@ -51,11 +64,16 @@ export const signupDeliveryAgent = async (req, res) => {
     });
 
     if (authError || !authData.user) {
-      console.error('❌ Failed to create auth user:', authError);
+      console.error('❌ Failed to create auth user:', {
+        error: authError,
+        message: authError?.message,
+        status: authError?.status,
+        code: authError?.code,
+      });
       return res.status(500).json({
         success: false,
-        error: 'Failed to create user account',
-        details: authError?.message,
+        error: `Failed to create user account: ${authError?.message || 'Unknown error'}`,
+        details: authError,
       });
     }
 
