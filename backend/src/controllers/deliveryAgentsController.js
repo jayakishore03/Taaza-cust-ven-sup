@@ -195,10 +195,18 @@ export const loginDeliveryAgent = async (req, res) => {
     }
 
     if (!agent) {
+      // Debug: List all delivery agents to see what phone formats exist
+      const { data: allAgents } = await supabase
+        .from('delivery_agents')
+        .select('phone_number, email')
+        .limit(10);
+      
       console.error('❌ Agent not found with any phone variant');
+      console.log('📋 Sample phone numbers in database:', allAgents?.map(a => a.phone_number));
+      
       return res.status(404).json({
         success: false,
-        error: 'No account found with this phone number',
+        error: `No account found with this phone number. Tried: ${phoneVariants.join(', ')}`,
       });
     }
 
