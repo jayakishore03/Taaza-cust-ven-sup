@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { deliveryAgentAPI } from '../services/api';
 
 interface AuthContextType {
   session: any | null;
@@ -55,7 +56,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       if (isPhone) {
         // Use backend API for phone login
-        const { deliveryAgentAPI } = await import('../services/api');
         const result = await deliveryAgentAPI.loginWithPhone(email, password);
         
         // Set the session from backend response
