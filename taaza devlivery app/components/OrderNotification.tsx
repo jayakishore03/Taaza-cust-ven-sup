@@ -5,6 +5,13 @@ import { Audio } from 'expo-av';
 
 const { width } = Dimensions.get('window');
 
+interface OrderItem {
+  name: string;
+  quantity: number;
+  weight: string;
+  price: number;
+}
+
 interface OrderNotificationProps {
   notification: {
     id: string;
@@ -13,6 +20,8 @@ interface OrderNotificationProps {
     customer_address: string;
     distance_km: number;
     expires_at: string;
+    order_items?: string; // JSON string
+    order_total?: number;
   } | null;
   onAccept: () => void;
   onReject: () => void;
@@ -158,6 +167,43 @@ export default function OrderNotification({ notification, onAccept, onReject }: 
               <Text style={styles.distanceLabel}>Total Distance</Text>
               <Text style={styles.distanceValue}>{notification.distance_km.toFixed(1)} km</Text>
             </View>
+
+            {/* Order Items */}
+            {notification.order_items && (() => {
+              try {
+                const items: OrderItem[] = JSON.parse(notification.order_items);
+                return (
+                  <View style={styles.orderSection}>
+                    <Text style={styles.orderSectionTitle}>Order Items ({items.length})</Text>
+                    {items.slice(0, 3).map((item, index) => (
+                      <View key={index} style={styles.orderItem}>
+                        <View style={styles.orderItemInfo}>
+                          <Text style={styles.orderItemName}>{item.name}</Text>
+                          <Text style={styles.orderItemDetails}>
+                            Qty: {item.quantity} {item.weight ? `• ${item.weight}` : ''}
+                          </Text>
+                        </View>
+                        <Text style={styles.orderItemPrice}>₹{item.price}</Text>
+                      </View>
+                    ))}
+                    {items.length > 3 && (
+                      <Text style={styles.moreItems}>+{items.length - 3} more items</Text>
+                    )}
+                  </View>
+                );
+              } catch (error) {
+                console.error('Error parsing order items:', error);
+                return null;
+              }
+            })()}
+
+            {/* Order Total */}
+            {notification.order_total && (
+              <View style={styles.totalCard}>
+                <Text style={styles.totalLabel}>Order Total</Text>
+                <Text style={styles.totalValue}>₹{notification.order_total.toFixed(2)}</Text>
+              </View>
+            )}
           </View>
 
           {/* Action Buttons */}
@@ -328,5 +374,70 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFF',
   },
+  orderSection: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 12,
+  },
+  orderSectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 12,
+  },
+  orderItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  orderItemInfo: {
+    flex: 1,
+  },
+  orderItemName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 4,
+  },
+  orderItemDetails: {
+    fontSize: 12,
+    color: '#666',
+  },
+  orderItemPrice: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#000',
+  },
+  moreItems: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  totalCard: {
+    backgroundColor: '#FF6B35',
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  totalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  totalValue: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#FFF',
+  },
 });
+
 

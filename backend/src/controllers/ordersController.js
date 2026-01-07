@@ -1064,6 +1064,113 @@ export const createOrder = async (req, res, next) => {
       console.log('Enriched items count:', enrichedItems.length);
       console.log('Enriched items:', JSON.stringify(enrichedItems, null, 2));
     }
+
+    // ⭐ AUTOMATIC DELIVERY NOTIFICATION - Notify delivery agent immediately when order is placed
+    try {
+      console.log('📦 New order placed - Finding delivery agents for notification...');
+      
+      const shop = shopResult.data;
+      const address = addressResult.data;
+
+      if (!shop || !address) {
+        console.error('❌ Cannot create notification: Missing shop or address data');
+      } else if (!shop.latitude || !shop.longitude || !address.latitude || !address.longitude) {
+        console.error('❌ Cannot create notification: Missing coordinates');
+        console.log('   Shop:', { lat: shop.latitude, lng: shop.longitude });
+        console.log('   Customer:', { lat: address.latitude, lng: address.longitude });
+      } else {
+        // Find nearby delivery agents (within 10km radius)
+        const { data: agents, error: agentsError } = await supabaseAdmin
+          .from('delivery_agents')
+          .select('*')
+          .eq('is_on_duty', true)
+          .eq('is_available', true)
+          .eq('verification_status', 'verified')
+          .not('current_latitude', 'is', null)
+          .not('current_longitude', 'is', null);
+
+        if (agentsError) {
+          console.error('❌ Error finding delivery agents:', agentsError);
+        } else if (!agents || agents.length === 0) {
+          console.warn('⚠️  No available delivery agents found. Order will wait for agent to come online.');
+        } else {
+          // Calculate distances and find nearest agent
+          const shopLat = parseFloat(shop.latitude);
+          const shopLng = parseFloat(shop.longitude);
+          const customerLat = parseFloat(address.latitude);
+          const customerLng = parseFloat(address.longitude);
+
+          const agentsWithDistance = agents
+            .filter(agent => agent.current_latitude && agent.current_longitude)
+            .map(agent => {
+              const distance = calculateDistance(
+                shopLat,
+                shopLng,
+                parseFloat(agent.current_latitude),
+                parseFloat(agent.current_longitude)
+              );
+              return { ...agent, distance };
+            })
+            .filter(agent => agent.distance <= 10) // Within 10km
+            .sort((a, b) => a.distance - b.distance);
+
+          if (agentsWithDistance.length === 0) {
+            console.warn('⚠️  No delivery agents found within 10km radius');
+          } else {
+            const nearestAgent = agentsWithDistance[0];
+            console.log(`✅ Found ${agentsWithDistance.length} agents within 10km, nearest: ${nearestAgent.full_name} (${nearestAgent.distance.toFixed(2)}km away)`);
+
+            // Calculate delivery distance (shop to customer)
+            const deliveryDistance = calculateDistance(shopLat, shopLng, customerLat, customerLng);
+
+            // Prepare order items summary for notification
+            const itemsSummary = enrichedItems.map(item => ({
+              name: item.name,
+              quantity: item.quantity,
+              weight: item.weight || '',
+              price: item.price
+            }));
+
+            // Create notification for nearest agent with order details
+            const { data: notification, error: notifError } = await supabaseAdmin
+              .from('delivery_notifications')
+              .insert({
+                order_id: orderId,
+                agent_user_id: nearestAgent.user_id,
+                shop_name: shop.name,
+                shop_address: shop.address,
+                customer_address: `${address.address_line1 || address.street || ''}, ${address.city}`,
+                shop_latitude: shopLat,
+                shop_longitude: shopLng,
+                customer_latitude: customerLat,
+                customer_longitude: customerLng,
+                distance_km: deliveryDistance,
+                order_items: JSON.stringify(itemsSummary), // Store items as JSON
+                order_total: order.total,
+                status: 'pending',
+                created_at: now,
+                expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes
+              })
+              .select()
+              .single();
+
+            if (notifError) {
+              console.error('❌ Error creating delivery notification:', notifError);
+            } else {
+              console.log('✅ Delivery notification created:', notification.id);
+              console.log(`   Agent: ${nearestAgent.full_name}`);
+              console.log(`   Shop: ${shop.name}`);
+              console.log(`   Distance: ${deliveryDistance.toFixed(2)}km`);
+              console.log(`   Items: ${enrichedItems.length} products`);
+              console.log(`   Total: ₹${order.total}`);
+            }
+          }
+        }
+      }
+    } catch (notifError) {
+      console.error('❌ Error in automatic delivery notification:', notifError);
+      // Don't fail the order creation if notification fails
+    }
     
     res.status(201).json({
       success: true,
