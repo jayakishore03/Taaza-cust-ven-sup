@@ -7,26 +7,12 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  Image,
 } from "react-native";
 import * as Location from "expo-location";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCallback } from "react";
-import { Platform, Linking, Dimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
-const { width } = Dimensions.get("window");
-
-const stores = [
-  { id: '1', name: 'Moms Laundry & Dry Cleaning', address: 'currencynagar', logo: { uri: 'https://lh3.googleusercontent.com/p/AF1QipPi8Ta0mZG0SaVn-IJgDaRzwfv8cpDtulZM7iCp=s1360-w1360-h1020-rw' }, latitude: 16.5062, longitude: 80.6480, distance: 1.2 },
-  { id: '2', name: 'Tumbledry Dry Clean & Laundry Service', address: 'Ramavarapadu', logo: { uri: 'https://lh3.googleusercontent.com/p/AF1QipNexlS0H2-zDzVglONCp6BRo23OdS1WhGYCREZL=s1360-w1360-h1020-rw' }, latitude: 16.5070, longitude: 80.6520, distance: 2.8 },
-  { id: '3', name: 'Premium Laundry', address: 'Sai Baba Temple Rd', logo: { uri: 'https://lh3.googleusercontent.com/gps-cs-s/AC9h4nrDEv8BUcPmgxu0hCqBmFa4DyHC78xL0gbu2LqfSAgFQsAN0LoKsc6PAPGnLYdAIE3JYAwdYx946ymL3wJXNec-a6XBoFY4av8l0pxv7E-_yOFxqM4EJIx0zTheMksVATIWFsel=s1360-w1360-h1020-rw' }, latitude: 16.5055, longitude: 80.6500, distance: 3.5 },
-  { id: '4', name: 'Zeenath saree polish and rolling', address: 'Gurunanak nagar', logo: { uri: 'https://lh3.googleusercontent.com/p/AF1QipND7FFZv4y7NSr3coIVfff8CajhIS_rkBpp42Uo=s1360-w1360-h1020-rw' }, latitude: 16.5080, longitude: 80.6450, distance: 4.1 },
-  { id: '5', name: 'Vasudha Dry Cleaners', address: 'Moghalrajpuram', logo: { uri: 'https://lh3.googleusercontent.com/p/AF1QipPtxh_c1ZhM9p1LNTRYdYp7co6J45gVi69FAqTs=s1360-w1360-h1020-rw' }, latitude: 16.5090, longitude: 80.6470, distance: 5.0 },
-  { id: '6', name: 'PRESSO LAUNDRY', address: ' Tadepalli', logo: { uri: 'https://lh3.googleusercontent.com/p/AF1QipMh9--b7avnMdJMJYzDOG2AdKmFyjXM2dnW5hxZ=s1360-w1360-h1020-rw' }, latitude: 16.5100, longitude: 80.6490, distance: 5.8 },
-];    
- 
 
 
 export default function LandingScreen() {
@@ -99,24 +85,6 @@ export default function LandingScreen() {
     );
   };
 
-  const openDirections = (lat: number, lon: number) => {
-    const scheme = Platform.select({
-      ios: `maps://app?daddr=${lat},${lon}`,
-      android: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`,
-    });
-    Linking.canOpenURL(scheme!)
-      .then((supported) => {
-        if (supported) {
-          Linking.openURL(scheme!);
-        } else {
-          Alert.alert("Error", "Unable to open the maps app.");
-        }
-      })
-      .catch(() => {
-        Alert.alert("Error", "Failed to open the maps app.");
-      });
-  };
-
   // Show loading while checking auth or location
   if (authLoading || locationLoading) {
     return (
@@ -166,22 +134,17 @@ export default function LandingScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 + Math.max(insets.bottom, 0) }]}
         showsVerticalScrollIndicator={false}
       >
-        {stores.map((store) => (
-          <View style={styles.storeCard} key={store.id}>
-            <Image source={store.logo} style={styles.storeLogo} />
-            <View style={styles.storeDetails}>
-              <Text style={styles.storeName}>{store.name}</Text>
-              <Text style={styles.storeAddress}>{store.address}</Text>
-              <Text style={styles.storeDistance}>{store.distance} km away</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.directionButton}
-              onPress={() => openDirections(store.latitude, store.longitude)}
-            >
-              <Text style={styles.directionButtonText}>Directions</Text>
-            </TouchableOpacity>
-          </View>
-        ))}
+        <View style={styles.emptyStateContainer}>
+          <Text style={styles.emptyStateEmoji}>📦</Text>
+          <Text style={styles.emptyStateTitle}>
+            {onDuty ? "Waiting for Orders" : "You're Off Duty"}
+          </Text>
+          <Text style={styles.emptyStateSubtitle}>
+            {onDuty 
+              ? "New delivery requests will appear here" 
+              : "Toggle 'On Duty' to start receiving orders"}
+          </Text>
+        </View>
       </ScrollView>
     </View>
   );
@@ -241,57 +204,31 @@ const styles = StyleSheet.create({
     color: "#000",
   },
   scrollContent: {
-    paddingBottom: 20, // Base padding, will be adjusted with safe area insets
-  },
-  storeCard: {
-    flexDirection: "row",
-    backgroundColor: "#fafafa",
-    borderRadius: 15,
-    padding: 15,
-    marginBottom: 15,
-    alignItems: "center",
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-  },
-  storeLogo: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    backgroundColor: "#eee",
-  },
-  storeDetails: {
+    paddingBottom: 20,
     flex: 1,
-    marginLeft: 15,
   },
-  storeName: {
-    fontSize: 18,
+  emptyStateContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 40,
+    paddingTop: 100,
+  },
+  emptyStateEmoji: {
+    fontSize: 80,
+    marginBottom: 20,
+  },
+  emptyStateTitle: {
+    fontSize: 24,
     fontWeight: "700",
     color: "#000",
+    marginBottom: 12,
+    textAlign: "center",
   },
-  storeAddress: {
-    fontSize: 14,
-    color: "#4B5563", // cool gray
-    marginVertical: 3,
-  },
-  storeDistance: {
-    fontSize: 12,
-    color: "#9CA3AF",
-  },
-  directionButton: {
-    backgroundColor: "#000",
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 7,
-  },
-  directionButtonText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 14,
+  emptyStateSubtitle: {
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 24,
   },
 });
