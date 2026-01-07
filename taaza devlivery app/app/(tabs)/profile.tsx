@@ -95,8 +95,14 @@ export default function ProfileScreen() {
         text: "Sign Out",
         style: "destructive",
         onPress: async () => {
-          await signOut();
-          router.replace("/");
+          try {
+            await signOut();
+            // Clear the navigation stack and go to landing page
+            router.replace("/");
+          } catch (error) {
+            console.error('Logout error:', error);
+            Alert.alert('Error', 'Failed to sign out. Please try again.');
+          }
         },
       },
     ]);
