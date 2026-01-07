@@ -170,6 +170,7 @@ export const loginDeliveryAgent = async (req, res) => {
     }
 
     console.log('📱 Searching for phone with last 10 digits:', digitsOnly);
+    console.log('🔍 SQL pattern:', `%${digitsOnly}`);
 
     // Use SQL LIKE to find phone number ending with these 10 digits
     // This will match any format: +916303407434, +91-6303407434, 916303407434, 6303407434, etc.
@@ -178,27 +179,45 @@ export const loginDeliveryAgent = async (req, res) => {
       .select('user_id, email, full_name, phone_number')
       .like('phone_number', `%${digitsOnly}`);
 
+    console.log('🔍 Search result:', { found: agents?.length || 0, error: searchError });
+
     if (searchError) {
-      console.error('❌ Database error:', searchError);
+      console.error('❌ Database search error:', searchError);
       throw searchError;
     }
 
-    if (!agents || agents.length === 0) {
-      // Debug: List all delivery agents to see what phone formats exist
-      const { data: allAgents } = await supabase
-        .from('delivery_agents')
-        .select('phone_number, email, full_name')
-        .limit(10);
-      
-      console.error('❌ Agent not found with phone ending:', digitsOnly);
+    // Debug: ALWAYS list all delivery agents to see what's in the database
+    const { data: allAgents, error: allAgentsError } = await supabase
+      .from('delivery_agents')
+      .select('phone_number, email, full_name, user_id')
+      .limit(10);
+    
+    console.log('📊 Database status:');
+    console.log(`   Total agents found: ${allAgents?.length || 0}`);
+    if (allAgentsError) {
+      console.error('   Error fetching all agents:', allAgentsError);
+    }
+    
+    if (allAgents && allAgents.length > 0) {
       console.log('📋 All agents in database:');
-      allAgents?.forEach(a => {
-        console.log(`   - Phone: ${a.phone_number}, Email: ${a.email}, Name: ${a.full_name}`);
+      allAgents.forEach((a, index) => {
+        console.log(`   ${index + 1}. Phone: ${a.phone_number}, Email: ${a.email}, Name: ${a.full_name}`);
       });
+    } else {
+      console.log('   ⚠️  No delivery agents found in database!');
+    }
+
+    if (!agents || agents.length === 0) {
+      console.error(`❌ Agent not found with phone ending: ${digitsOnly}`);
       
       return res.status(404).json({
         success: false,
         error: `No account found with phone number ending in ${digitsOnly}`,
+        debug: {
+          searchPattern: `%${digitsOnly}`,
+          totalAgentsInDB: allAgents?.length || 0,
+          samplePhones: allAgents?.map(a => a.phone_number) || [],
+        },
       });
     }
 
