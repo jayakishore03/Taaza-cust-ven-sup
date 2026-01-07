@@ -153,65 +153,57 @@ export const loginDeliveryAgent = async (req, res) => {
       });
     }
 
-    // Normalize phone number - remove spaces, dashes, and ensure consistent format
-    let normalizedPhone = phone_number.replace(/[\s\-]/g, '');
+    // Extract just the 10-digit phone number (remove country code, spaces, dashes, etc.)
+    let digitsOnly = phone_number.replace(/\D/g, ''); // Remove all non-digits
     
-    // If doesn't start with +, add +91 for Indian numbers
-    if (!normalizedPhone.startsWith('+')) {
-      if (normalizedPhone.length === 10) {
-        normalizedPhone = '+91' + normalizedPhone;
-      } else if (normalizedPhone.startsWith('91') && normalizedPhone.length === 12) {
-        normalizedPhone = '+' + normalizedPhone;
-      } else {
-        normalizedPhone = '+' + normalizedPhone;
-      }
+    // If it starts with 91 (country code), remove it
+    if (digitsOnly.startsWith('91') && digitsOnly.length > 10) {
+      digitsOnly = digitsOnly.substring(2);
+    }
+    
+    // Should now have 10 digits
+    if (digitsOnly.length !== 10) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid phone number. Please enter a 10-digit Indian mobile number.',
+      });
     }
 
-    console.log('📱 Normalized phone:', normalizedPhone);
+    console.log('📱 Searching for phone with last 10 digits:', digitsOnly);
 
-    // Try multiple phone formats to find the agent
-    const phoneVariants = [
-      phone_number,                              // Original input (try first)
-      normalizedPhone,                           // +916303407434
-      normalizedPhone.replace(/^\+91/, '+91-'),  // +91-6303407434 (with dash)
-      normalizedPhone.replace('+91', '91'),      // 916303407434
-      normalizedPhone.replace('+', ''),          // 916303407434
-      normalizedPhone.replace(/^\+91/, ''),      // 6303407434
-      `+91-${normalizedPhone.replace(/^\+91/, '')}`, // +91-6303407434 (ensure dash format)
-    ];
+    // Use SQL LIKE to find phone number ending with these 10 digits
+    // This will match any format: +916303407434, +91-6303407434, 916303407434, 6303407434, etc.
+    const { data: agents, error: searchError } = await supabase
+      .from('delivery_agents')
+      .select('user_id, email, full_name, phone_number')
+      .like('phone_number', `%${digitsOnly}`);
 
-    console.log('🔍 Trying phone variants:', phoneVariants);
-
-    let agent = null;
-    for (const phoneVariant of phoneVariants) {
-      const { data, error } = await supabase
-        .from('delivery_agents')
-        .select('user_id, email, full_name, phone_number')
-        .eq('phone_number', phoneVariant)
-        .single();
-
-      if (data && !error) {
-        agent = data;
-        console.log('✅ Found agent with phone variant:', phoneVariant);
-        break;
-      }
+    if (searchError) {
+      console.error('❌ Database error:', searchError);
+      throw searchError;
     }
 
-    if (!agent) {
+    if (!agents || agents.length === 0) {
       // Debug: List all delivery agents to see what phone formats exist
       const { data: allAgents } = await supabase
         .from('delivery_agents')
-        .select('phone_number, email')
+        .select('phone_number, email, full_name')
         .limit(10);
       
-      console.error('❌ Agent not found with any phone variant');
-      console.log('📋 Sample phone numbers in database:', allAgents?.map(a => a.phone_number));
+      console.error('❌ Agent not found with phone ending:', digitsOnly);
+      console.log('📋 All agents in database:');
+      allAgents?.forEach(a => {
+        console.log(`   - Phone: ${a.phone_number}, Email: ${a.email}, Name: ${a.full_name}`);
+      });
       
       return res.status(404).json({
         success: false,
-        error: `No account found with this phone number. Tried: ${phoneVariants.join(', ')}`,
+        error: `No account found with phone number ending in ${digitsOnly}`,
       });
     }
+
+    const agent = agents[0]; // Take first match
+    console.log('✅ Found agent:', agent.email, 'with phone:', agent.phone_number);
 
     console.log('✅ Found agent:', agent.email);
 
