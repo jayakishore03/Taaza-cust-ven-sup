@@ -13,6 +13,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCallback } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import OrderNotification from "@/components/OrderNotification";
 
 
 export default function LandingScreen() {
@@ -23,6 +24,8 @@ export default function LandingScreen() {
   const [locationName, setLocationName] = useState("Fetching Location...");
   const [locationLoading, setLocationLoading] = useState(true);
   const hasShownAuthAlert = useRef(false);
+  const [currentNotification, setCurrentNotification] = useState<any>(null);
+  const notificationCheckInterval = useRef<NodeJS.Timeout | null>(null);
 
   // Check authentication when screen comes into focus
   useFocusEffect(
@@ -69,20 +72,142 @@ export default function LandingScreen() {
           longitude: location.coords.longitude,
         });
         setLocationName(address.city || "Vijayawada");
+        
+        // Update location in backend
+        if (user) {
+          updateLocationInBackend(location.coords.latitude, location.coords.longitude);
+        }
       } catch {
         setLocationName("Vijayawada");
       } finally {
         setLocationLoading(false);
       }
     })();
-  }, []);
+  }, [user]);
 
-  const toggleOnDuty = () => {
-    setOnDuty((prev) => !prev);
+  // Check for new notifications when on duty
+  useEffect(() => {
+    if (onDuty && user) {
+      checkForNotifications();
+      notificationCheckInterval.current = setInterval(checkForNotifications, 5000); // Check every 5 seconds
+    } else {
+      if (notificationCheckInterval.current) {
+        clearInterval(notificationCheckInterval.current);
+      }
+    }
+
+    return () => {
+      if (notificationCheckInterval.current) {
+        clearInterval(notificationCheckInterval.current);
+      }
+    };
+  }, [onDuty, user]);
+
+  const updateLocationInBackend = async (latitude: number, longitude: number) => {
+    try {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/delivery-agents/${user?.id}/location`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ latitude, longitude }),
+      });
+      
+      if (response.ok) {
+        console.log('✅ Location updated');
+      }
+    } catch (error) {
+      console.error('Error updating location:', error);
+    }
+  };
+
+  const checkForNotifications = async () => {
+    if (!user) return;
+    
+    try {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/delivery-agents/${user.id}/notifications`);
+      const result = await response.json();
+      
+      if (result.success && result.data && result.data.length > 0) {
+        setCurrentNotification(result.data[0]); // Show first pending notification
+      }
+    } catch (error) {
+      console.error('Error checking notifications:', error);
+    }
+  };
+
+  const toggleOnDuty = async () => {
+    const newStatus = !onDuty;
+    setOnDuty(newStatus);
+    
+    // Update duty status in backend
+    if (user) {
+      try {
+        await fetch(`${process.env.EXPO_PUBLIC_API_URL}/delivery-agents/${user.id}/duty-status`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ is_on_duty: newStatus }),
+        });
+      } catch (error) {
+        console.error('Error updating duty status:', error);
+      }
+    }
+    
     Alert.alert(
       "Status Changed",
-      `You are now ${!onDuty ? "On Duty" : "Off Duty"}.`
+      `You are now ${newStatus ? "On Duty" : "Off Duty"}.`
     );
+  };
+
+  const handleAcceptOrder = async () => {
+    if (!currentNotification) return;
+    
+    try {
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_API_URL}/delivery-agents/notifications/${currentNotification.id}/accept`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ agent_user_id: user?.id }),
+        }
+      );
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setCurrentNotification(null);
+        Alert.alert('Order Accepted', 'Order has been assigned to you!');
+        router.push('/orders'); // Navigate to orders tab
+      }
+    } catch (error) {
+      console.error('Error accepting order:', error);
+      Alert.alert('Error', 'Failed to accept order');
+    }
+  };
+
+  const handleRejectOrder = async () => {
+    if (!currentNotification) return;
+    
+    try {
+      await fetch(
+        `${process.env.EXPO_PUBLIC_API_URL}/delivery-agents/notifications/${currentNotification.id}/reject`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ agent_user_id: user?.id }),
+        }
+      );
+      
+      setCurrentNotification(null);
+    } catch (error) {
+      console.error('Error rejecting order:', error);
+    }
   };
 
   // Show loading while checking auth or location
@@ -146,6 +271,13 @@ export default function LandingScreen() {
           </Text>
         </View>
       </ScrollView>
+
+      {/* Order Notification Modal */}
+      <OrderNotification
+        notification={currentNotification}
+        onAccept={handleAcceptOrder}
+        onReject={handleRejectOrder}
+      />
     </View>
   );
 }

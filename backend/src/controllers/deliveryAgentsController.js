@@ -543,3 +543,259 @@ export const updateDutyStatus = async (req, res) => {
   }
 };
 
+// Find nearby delivery agents for an order
+export const findNearbyAgents = async (req, res) => {
+  try {
+    const { shop_latitude, shop_longitude, radius_km = 5 } = req.body;
+
+    if (!shop_latitude || !shop_longitude) {
+      return res.status(400).json({
+        success: false,
+        error: 'Shop location required',
+      });
+    }
+
+    // Get all active delivery agents who are on duty
+    const { data: agents, error } = await supabase
+      .from('delivery_agents')
+      .select('*')
+      .eq('is_on_duty', true)
+      .eq('is_available', true)
+      .eq('verification_status', 'verified');
+
+    if (error) {
+      throw error;
+    }
+
+    // Calculate distance and filter nearby agents
+    const nearbyAgents = agents
+      .filter(agent => agent.current_latitude && agent.current_longitude)
+      .map(agent => {
+        const distance = calculateDistance(
+          shop_latitude,
+          shop_longitude,
+          agent.current_latitude,
+          agent.current_longitude
+        );
+        return { ...agent, distance };
+      })
+      .filter(agent => agent.distance <= radius_km)
+      .sort((a, b) => a.distance - b.distance);
+
+    res.json({
+      success: true,
+      count: nearbyAgents.length,
+      data: nearbyAgents,
+    });
+  } catch (error) {
+    console.error('Error finding nearby agents:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    });
+  }
+};
+
+// Send order notification to delivery agent
+export const sendOrderNotification = async (req, res) => {
+  try {
+    const { order_id, agent_user_id, shop_name, shop_address, customer_address, shop_latitude, shop_longitude, customer_latitude, customer_longitude } = req.body;
+
+    if (!order_id || !agent_user_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Order ID and agent user ID required',
+      });
+    }
+
+    // Calculate distance between shop and customer
+    const distance = calculateDistance(
+      shop_latitude,
+      shop_longitude,
+      customer_latitude,
+      customer_longitude
+    );
+
+    // Create order notification in database
+    const { data, error } = await supabase
+      .from('delivery_notifications')
+      .insert({
+        order_id,
+        agent_user_id,
+        shop_name,
+        shop_address,
+        customer_address,
+        shop_latitude,
+        shop_longitude,
+        customer_latitude,
+        customer_longitude,
+        distance_km: distance,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      message: 'Notification sent to delivery agent',
+      data,
+    });
+  } catch (error) {
+    console.error('Error sending notification:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    });
+  }
+};
+
+// Get pending notifications for delivery agent
+export const getPendingNotifications = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const { data, error } = await supabase
+      .from('delivery_notifications')
+      .select('*')
+      .eq('agent_user_id', userId)
+      .eq('status', 'pending')
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      count: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    });
+  }
+};
+
+// Accept order by delivery agent
+export const acceptOrder = async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    const { agent_user_id } = req.body;
+
+    // Update notification status to accepted
+    const { data: notification, error: notifError } = await supabase
+      .from('delivery_notifications')
+      .update({ status: 'accepted', accepted_at: new Date().toISOString() })
+      .eq('id', notificationId)
+      .eq('agent_user_id', agent_user_id)
+      .eq('status', 'pending')
+      .select()
+      .single();
+
+    if (notifError || !notification) {
+      return res.status(404).json({
+        success: false,
+        error: 'Notification not found or already processed',
+      });
+    }
+
+    // Update order with delivery agent
+    const { error: orderError } = await supabase
+      .from('orders')
+      .update({
+        delivery_agent_id: agent_user_id,
+        status: 'assigned_to_delivery',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', notification.order_id);
+
+    if (orderError) {
+      throw orderError;
+    }
+
+    // Mark agent as unavailable
+    await supabase
+      .from('delivery_agents')
+      .update({ is_available: false })
+      .eq('user_id', agent_user_id);
+
+    // Reject other pending notifications for this order
+    await supabase
+      .from('delivery_notifications')
+      .update({ status: 'expired' })
+      .eq('order_id', notification.order_id)
+      .neq('id', notificationId);
+
+    res.json({
+      success: true,
+      message: 'Order accepted successfully',
+      data: notification,
+    });
+  } catch (error) {
+    console.error('Error accepting order:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    });
+  }
+};
+
+// Reject order by delivery agent
+export const rejectOrder = async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    const { agent_user_id } = req.body;
+
+    const { data, error } = await supabase
+      .from('delivery_notifications')
+      .update({ status: 'rejected', rejected_at: new Date().toISOString() })
+      .eq('id', notificationId)
+      .eq('agent_user_id', agent_user_id)
+      .eq('status', 'pending')
+      .select()
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({
+        success: false,
+        error: 'Notification not found or already processed',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Order rejected',
+      data,
+    });
+  } catch (error) {
+    console.error('Error rejecting order:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    });
+  }
+};
+
+// Helper function to calculate distance between two coordinates (Haversine formula)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Distance in km
+}
+
